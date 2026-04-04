@@ -1,22 +1,37 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: آل ياسين لاكسسوار الموتال - نظام الكاشير
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: users
+    description: Users management
+  - name: products
+    description: Products management
+  - name: suppliers
+    description: Suppliers management
+  - name: purchases
+    description: Purchases management
+  - name: sales
+    description: Sales and invoices
+  - name: debts
+    description: Debts management
+  - name: dashboard
+    description: Dashboard summaries
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +39,688 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserBody"
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /users/{id}/permissions:
+    patch:
+      operationId: updateUserPermissions
+      tags: [users]
+      summary: Update user permissions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePermissionsBody"
+      responses:
+        "200":
+          description: Updated permissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: List all products
+      parameters:
+        - name: lowStock
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+    post:
+      operationId: createProduct
+      tags: [products]
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductBody"
+      responses:
+        "201":
+          description: Created product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      summary: Get product by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateProduct
+      tags: [products]
+      summary: Update product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductBody"
+      responses:
+        "200":
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+    delete:
+      operationId: deleteProduct
+      tags: [products]
+      summary: Delete product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /suppliers:
+    get:
+      operationId: listSuppliers
+      tags: [suppliers]
+      summary: List all suppliers
+      responses:
+        "200":
+          description: List of suppliers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Supplier"
+    post:
+      operationId: createSupplier
+      tags: [suppliers]
+      summary: Create a supplier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSupplierBody"
+      responses:
+        "201":
+          description: Created supplier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+
+  /suppliers/{id}:
+    get:
+      operationId: getSupplier
+      tags: [suppliers]
+      summary: Get supplier by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Supplier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateSupplier
+      tags: [suppliers]
+      summary: Update supplier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSupplierBody"
+      responses:
+        "200":
+          description: Updated supplier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+    delete:
+      operationId: deleteSupplier
+      tags: [suppliers]
+      summary: Delete supplier
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /purchases:
+    get:
+      operationId: listPurchases
+      tags: [purchases]
+      summary: List all purchases
+      parameters:
+        - name: supplierId
+          in: query
+          schema:
+            type: integer
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of purchases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Purchase"
+    post:
+      operationId: createPurchase
+      tags: [purchases]
+      summary: Create a purchase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePurchaseBody"
+      responses:
+        "201":
+          description: Created purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+
+  /purchases/{id}:
+    get:
+      operationId: getPurchase
+      tags: [purchases]
+      summary: Get purchase by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Purchase
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "404":
+          description: Not found
+
+  /sales:
+    get:
+      operationId: listSales
+      tags: [sales]
+      summary: List all sales/invoices
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: customerName
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of sales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+    post:
+      operationId: createSale
+      tags: [sales]
+      summary: Create a sale/invoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSaleBody"
+      responses:
+        "201":
+          description: Created sale
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+
+  /sales/{id}:
+    get:
+      operationId: getSale
+      tags: [sales]
+      summary: Get sale by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sale
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "404":
+          description: Not found
+
+  /debts:
+    get:
+      operationId: listDebts
+      tags: [debts]
+      summary: List all debts
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [customer, supplier]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, partial, paid]
+      responses:
+        "200":
+          description: List of debts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Debt"
+    post:
+      operationId: createDebt
+      tags: [debts]
+      summary: Create a debt record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDebtBody"
+      responses:
+        "201":
+          description: Created debt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Debt"
+
+  /debts/{id}:
+    get:
+      operationId: getDebt
+      tags: [debts]
+      summary: Get debt by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Debt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Debt"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateDebt
+      tags: [debts]
+      summary: Update debt (payment)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDebtBody"
+      responses:
+        "200":
+          description: Updated debt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Debt"
+
+  /debts/{id}/payments:
+    post:
+      operationId: addDebtPayment
+      tags: [debts]
+      summary: Add payment to a debt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddPaymentBody"
+      responses:
+        "201":
+          description: Payment added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Debt"
+
+  /customers/debts:
+    get:
+      operationId: getCustomerDebts
+      tags: [debts]
+      summary: Get debts by customer name
+      parameters:
+        - name: customerName
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Customer debts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Debt"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [today, week, month, year]
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/low-stock:
+    get:
+      operationId: getLowStockProducts
+      tags: [dashboard]
+      summary: Get low stock products
+      responses:
+        "200":
+          description: Low stock products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+  /dashboard/recent-sales:
+    get:
+      operationId: getRecentSales
+      tags: [dashboard]
+      summary: Get recent sales
+      responses:
+        "200":
+          description: Recent sales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sale"
+
+  /dashboard/sales-chart:
+    get:
+      operationId: getSalesChart
+      tags: [dashboard]
+      summary: Get sales chart data
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [week, month, year]
+      responses:
+        "200":
+          description: Sales chart data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChartDataPoint"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +731,637 @@ components:
       required:
         - status
 
+    LoginBody:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+        - username
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+      required:
+        - user
+        - token
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, cashier]
+        permissions:
+          $ref: "#/components/schemas/Permissions"
+        createdAt:
+          type: string
+      required:
+        - id
+        - username
+        - name
+        - role
+        - permissions
+        - createdAt
+
+    Permissions:
+      type: object
+      properties:
+        canViewDashboard:
+          type: boolean
+        canManageProducts:
+          type: boolean
+        canManageSuppliers:
+          type: boolean
+        canMakeSales:
+          type: boolean
+        canViewReports:
+          type: boolean
+        canManageUsers:
+          type: boolean
+        canManageDebts:
+          type: boolean
+        canViewPurchases:
+          type: boolean
+        canCreatePurchases:
+          type: boolean
+      required:
+        - canViewDashboard
+        - canManageProducts
+        - canManageSuppliers
+        - canMakeSales
+        - canViewReports
+        - canManageUsers
+        - canManageDebts
+        - canViewPurchases
+        - canCreatePurchases
+
+    CreateUserBody:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, cashier]
+      required:
+        - username
+        - password
+        - name
+        - role
+
+    UpdateUserBody:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, cashier]
+
+    UpdatePermissionsBody:
+      type: object
+      properties:
+        permissions:
+          $ref: "#/components/schemas/Permissions"
+      required:
+        - permissions
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        costPrice:
+          type: number
+        sellingPrice:
+          type: number
+        quantity:
+          type: integer
+        minStockLevel:
+          type: integer
+        unit:
+          type: string
+        isLowStock:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - costPrice
+        - sellingPrice
+        - quantity
+        - minStockLevel
+        - unit
+        - isLowStock
+        - createdAt
+        - updatedAt
+
+    CreateProductBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        barcode:
+          type: string
+        category:
+          type: string
+        costPrice:
+          type: number
+        sellingPrice:
+          type: number
+        quantity:
+          type: integer
+        minStockLevel:
+          type: integer
+        unit:
+          type: string
+      required:
+        - name
+        - costPrice
+        - sellingPrice
+        - quantity
+        - minStockLevel
+        - unit
+
+    UpdateProductBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        barcode:
+          type: string
+        category:
+          type: string
+        costPrice:
+          type: number
+        sellingPrice:
+          type: number
+        quantity:
+          type: integer
+        minStockLevel:
+          type: integer
+        unit:
+          type: string
+
+    Supplier:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        totalDebt:
+          type: number
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - totalDebt
+        - createdAt
+
+    CreateSupplierBody:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        notes:
+          type: string
+      required:
+        - name
+
+    UpdateSupplierBody:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        notes:
+          type: string
+
+    Purchase:
+      type: object
+      properties:
+        id:
+          type: integer
+        supplierId:
+          type: integer
+        supplierName:
+          type: string
+        invoiceNumber:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        remainingAmount:
+          type: number
+        paymentType:
+          type: string
+          enum: [cash, credit, partial]
+        notes:
+          type: ["string", "null"]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseItem"
+        createdAt:
+          type: string
+      required:
+        - id
+        - supplierId
+        - supplierName
+        - totalAmount
+        - paidAmount
+        - remainingAmount
+        - paymentType
+        - items
+        - createdAt
+
+    PurchaseItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        productId:
+          type: integer
+        productName:
+          type: string
+        quantity:
+          type: integer
+        costPrice:
+          type: number
+        total:
+          type: number
+      required:
+        - id
+        - productId
+        - productName
+        - quantity
+        - costPrice
+        - total
+
+    CreatePurchaseBody:
+      type: object
+      properties:
+        supplierId:
+          type: integer
+        invoiceNumber:
+          type: string
+        paymentType:
+          type: string
+          enum: [cash, credit, partial]
+        paidAmount:
+          type: number
+        notes:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreatePurchaseItemBody"
+      required:
+        - supplierId
+        - paymentType
+        - paidAmount
+        - items
+
+    CreatePurchaseItemBody:
+      type: object
+      properties:
+        productId:
+          type: integer
+        quantity:
+          type: integer
+        costPrice:
+          type: number
+      required:
+        - productId
+        - quantity
+        - costPrice
+
+    Sale:
+      type: object
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        customerName:
+          type: ["string", "null"]
+        customerPhone:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        discountAmount:
+          type: number
+        previousDebt:
+          type: number
+        remainingDebt:
+          type: number
+        paymentType:
+          type: string
+          enum: [cash, credit, partial]
+        notes:
+          type: ["string", "null"]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleItem"
+        createdAt:
+          type: string
+        cashierName:
+          type: string
+      required:
+        - id
+        - invoiceNumber
+        - totalAmount
+        - paidAmount
+        - discountAmount
+        - previousDebt
+        - remainingDebt
+        - paymentType
+        - items
+        - createdAt
+        - cashierName
+
+    SaleItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        productId:
+          type: integer
+        productName:
+          type: string
+        quantity:
+          type: integer
+        sellingPrice:
+          type: number
+        total:
+          type: number
+      required:
+        - id
+        - productId
+        - productName
+        - quantity
+        - sellingPrice
+        - total
+
+    CreateSaleBody:
+      type: object
+      properties:
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+        paymentType:
+          type: string
+          enum: [cash, credit, partial]
+        paidAmount:
+          type: number
+        discountAmount:
+          type: number
+        notes:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateSaleItemBody"
+      required:
+        - paymentType
+        - paidAmount
+        - discountAmount
+        - items
+
+    CreateSaleItemBody:
+      type: object
+      properties:
+        productId:
+          type: integer
+        quantity:
+          type: integer
+        sellingPrice:
+          type: number
+      required:
+        - productId
+        - quantity
+        - sellingPrice
+
+    Debt:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [customer, supplier]
+        customerName:
+          type: ["string", "null"]
+        customerPhone:
+          type: ["string", "null"]
+        supplierId:
+          type: ["integer", "null"]
+        supplierName:
+          type: ["string", "null"]
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        remainingAmount:
+          type: number
+        status:
+          type: string
+          enum: [pending, partial, paid]
+        saleId:
+          type: ["integer", "null"]
+        purchaseId:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/DebtPayment"
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - type
+        - totalAmount
+        - paidAmount
+        - remainingAmount
+        - status
+        - payments
+        - createdAt
+        - updatedAt
+
+    DebtPayment:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: number
+        notes:
+          type: ["string", "null"]
+        paidAt:
+          type: string
+      required:
+        - id
+        - amount
+        - paidAt
+
+    CreateDebtBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [customer, supplier]
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+        supplierId:
+          type: integer
+        totalAmount:
+          type: number
+        paidAmount:
+          type: number
+        notes:
+          type: string
+        saleId:
+          type: integer
+        purchaseId:
+          type: integer
+      required:
+        - type
+        - totalAmount
+        - paidAmount
+
+    UpdateDebtBody:
+      type: object
+      properties:
+        notes:
+          type: string
+
+    AddPaymentBody:
+      type: object
+      properties:
+        amount:
+          type: number
+        notes:
+          type: string
+      required:
+        - amount
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalSalesToday:
+          type: number
+        totalSalesWeek:
+          type: number
+        totalSalesMonth:
+          type: number
+        totalPurchasesMonth:
+          type: number
+        totalProfit:
+          type: number
+        totalProfitMonth:
+          type: number
+        totalCustomerDebts:
+          type: number
+        totalSupplierDebts:
+          type: number
+        lowStockCount:
+          type: integer
+        totalProducts:
+          type: integer
+        totalSalesCount:
+          type: integer
+        totalPurchasesCount:
+          type: integer
+      required:
+        - totalSalesToday
+        - totalSalesWeek
+        - totalSalesMonth
+        - totalPurchasesMonth
+        - totalProfit
+        - totalProfitMonth
+        - totalCustomerDebts
+        - totalSupplierDebts
+        - lowStockCount
+        - totalProducts
+        - totalSalesCount
+        - totalPurchasesCount
+
+    ChartDataPoint:
+      type: object
+      properties:
+        label:
+          type: string
+        sales:
+          type: number
+        purchases:
+          type: number
+        profit:
+          type: number
+      required:
+        - label
+        - sales
+        - purchases
+        - profit

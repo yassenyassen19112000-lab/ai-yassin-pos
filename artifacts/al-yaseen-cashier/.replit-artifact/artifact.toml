@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "آل ياسين لاكسسوار الموتال"
+version = "1.0.0"
+id = "artifacts/al-yaseen-cashier"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24224
+
+[services.development]
+run = "pnpm --filter @workspace/al-yaseen-cashier run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/al-yaseen-cashier", "run", "build" ]
+publicDir = "artifacts/al-yaseen-cashier/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24224"
+BASE_PATH = "/"
