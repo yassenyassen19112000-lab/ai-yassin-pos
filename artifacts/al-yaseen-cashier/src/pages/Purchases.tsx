@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Loader2, Trash2, Receipt } from "lucide-react";
+import { Plus, Loader2, Trash2, Receipt, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface PurchaseItem { productId: number; productName: string; quantity: number; costPrice: number; }
@@ -37,6 +37,7 @@ export default function Purchases() {
   const [itemQty, setItemQty] = useState("1");
   const [itemPrice, setItemPrice] = useState("");
   const [includeExistingDebt, setIncludeExistingDebt] = useState(false);
+  const [search, setSearch] = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -69,6 +70,10 @@ export default function Purchases() {
     setItems(prev => [...prev, { productId: product.id, productName: product.name, quantity: parseInt(itemQty), costPrice: parseFloat(itemPrice) }]);
     setSelectedProduct(""); setItemQty("1"); setItemPrice("");
   };
+
+  const filteredPurchases = (purchases ?? []).filter(p =>
+    !search || p.supplierName.toLowerCase().includes(search.toLowerCase()) || p.invoiceNumber?.includes(search)
+  );
 
   const itemsTotal = items.reduce((s, i) => s + i.quantity * i.costPrice, 0);
   const previousDebt = (includeExistingDebt && supplierPendingDebt) ? supplierPendingDebt.pendingDebt : 0;
@@ -103,6 +108,16 @@ export default function Purchases() {
         <Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4 ml-1" />تسجيل مشترى</Button>
       </div>
 
+      <div className="relative">
+        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="بحث باسم المورد أو رقم الفاتورة..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pr-9"
+        />
+      </div>
+
       {isLoading ? <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
         <Card>
           <Table>
@@ -118,7 +133,7 @@ export default function Purchases() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(purchases ?? []).map((p) => (
+              {filteredPurchases.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-medium">{p.supplierName}</TableCell>
                   <TableCell>{p.invoiceNumber ?? "-"}</TableCell>
@@ -129,8 +144,8 @@ export default function Purchases() {
                   <TableCell className="text-muted-foreground text-sm">{formatDateTime(p.createdAt)}</TableCell>
                 </TableRow>
               ))}
-              {(!purchases || purchases.length === 0) && (
-                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />لا توجد مشتريات</TableCell></TableRow>
+              {filteredPurchases.length === 0 && (
+                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground"><Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />{search ? "لا توجد نتائج للبحث" : "لا توجد مشتريات"}</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

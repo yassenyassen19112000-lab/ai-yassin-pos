@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Plus, Edit, Trash2, Phone, Loader2, Truck } from "lucide-react";
+import { Plus, Edit, Trash2, Phone, Loader2, Truck, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface SupplierForm { name: string; phone: string; address: string; notes: string; }
@@ -25,6 +25,7 @@ export default function Suppliers() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
+  const [search, setSearch] = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -41,6 +42,10 @@ export default function Suppliers() {
     else createMutation.mutate({ data });
   };
 
+  const filteredSuppliers = (suppliers ?? []).filter(s =>
+    !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.phone?.includes(search)
+  );
+
   return (
     <div className="space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
@@ -50,15 +55,25 @@ export default function Suppliers() {
         </Button>
       </div>
 
+      <div className="relative">
+        <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="بحث باسم المورد أو رقم الهاتف..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pr-9"
+        />
+      </div>
+
       {isLoading ? <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div> : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(suppliers ?? []).map((s) => (
+          {filteredSuppliers.map((s) => (
             <Card key={s.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="font-semibold">{s.name}</p>
-                    {s.phone && <p className="text-sm text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{s.phone}</p>}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold truncate">{s.name}</p>
+                    {s.phone && <p className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{s.phone}</p>}
                     {s.address && <p className="text-xs text-muted-foreground mt-0.5">{s.address}</p>}
                   </div>
                 </div>
@@ -76,10 +91,10 @@ export default function Suppliers() {
               </CardContent>
             </Card>
           ))}
-          {(!suppliers || suppliers.length === 0) && (
+          {filteredSuppliers.length === 0 && (
             <div className="col-span-full text-center py-16 text-muted-foreground">
               <Truck className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>لا يوجد موردين</p>
+              <p>{search ? "لا يوجد موردين بهذا الاسم" : "لا يوجد موردين"}</p>
             </div>
           )}
         </div>

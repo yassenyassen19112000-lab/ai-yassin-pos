@@ -96,29 +96,38 @@ export default function Sales() {
           <DialogHeader><DialogTitle>تفاصيل الفاتورة</DialogTitle></DialogHeader>
           {saleDetail && (
             <div className="space-y-3">
-              <div id="print-invoice" className="border rounded-lg p-4 text-sm">
-                <div className="text-center mb-3">
-                  <p className="font-bold text-base">آل ياسين لاكسسوار الموتال</p>
-                  <p className="text-xs text-muted-foreground">{formatDateTime(saleDetail.createdAt)}</p>
-                  <p className="text-xs font-mono">{saleDetail.invoiceNumber}</p>
+              <div id="print-invoice" className="border rounded-lg p-5 bg-white text-gray-900">
+                <div className="text-center mb-4 pb-3 border-b-2 border-gray-400">
+                  <p className="font-bold text-xl text-gray-900">آل ياسين لاكسسوار الموتال</p>
+                  <p className="text-sm text-gray-600 mt-1">{formatDateTime(saleDetail.createdAt)}</p>
+                  <p className="text-sm font-mono mt-1 text-gray-800">فاتورة رقم: {saleDetail.invoiceNumber}</p>
                 </div>
-                {saleDetail.customerName && <p className="text-xs mb-2">العميل: {saleDetail.customerName} {saleDetail.customerPhone && `- ${saleDetail.customerPhone}`}</p>}
-                <div className="space-y-1 mb-3">
+                {saleDetail.customerName && (
+                  <div className="mb-3 pb-2 border-b border-gray-300">
+                    <p className="font-semibold text-gray-900">العميل: {saleDetail.customerName}</p>
+                    {saleDetail.customerPhone && <p className="text-sm text-gray-600" dir="ltr">{saleDetail.customerPhone}</p>}
+                  </div>
+                )}
+                <div className="space-y-2 mb-4">
+                  <div className="grid grid-cols-3 text-xs font-bold text-gray-700 border-b border-gray-300 pb-1">
+                    <span>المنتج</span><span className="text-center">الكمية</span><span className="text-left">الإجمالي</span>
+                  </div>
                   {saleDetail.items.map((item: any) => (
-                    <div key={item.id} className="flex justify-between text-xs">
-                      <span>{item.productName} × {item.quantity}</span>
-                      <span>{formatCurrency(item.total)}</span>
+                    <div key={item.id} className="grid grid-cols-3 text-sm text-gray-900">
+                      <span className="truncate">{item.productName}</span>
+                      <span className="text-center">{item.quantity}</span>
+                      <span className="text-left font-medium">{formatCurrency(item.total)}</span>
                     </div>
                   ))}
                 </div>
-                <div className="border-t pt-2 space-y-1 text-xs">
-                  {saleDetail.discountAmount > 0 && <div className="flex justify-between"><span>الخصم</span><span>- {formatCurrency(saleDetail.discountAmount)}</span></div>}
-                  <div className="flex justify-between font-bold"><span>الإجمالي</span><span>{formatCurrency(saleDetail.totalAmount)}</span></div>
-                  {saleDetail.previousDebt > 0 && <div className="flex justify-between text-red-500"><span>ديون سابقة</span><span>{formatCurrency(saleDetail.previousDebt)}</span></div>}
-                  <div className="flex justify-between"><span>المدفوع</span><span className="text-green-600">{formatCurrency(saleDetail.paidAmount)}</span></div>
-                  {saleDetail.remainingDebt > 0 && <div className="flex justify-between text-red-500 font-bold"><span>المتبقي</span><span>{formatCurrency(saleDetail.remainingDebt)}</span></div>}
+                <div className="border-t-2 border-gray-400 pt-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between font-bold text-base text-gray-900"><span>الإجمالي</span><span>{formatCurrency(saleDetail.totalAmount)}</span></div>
+                  {saleDetail.discountAmount > 0 && <div className="flex justify-between text-gray-700"><span>الخصم</span><span>- {formatCurrency(saleDetail.discountAmount)}</span></div>}
+                  {saleDetail.previousDebt > 0 && <div className="flex justify-between text-gray-800"><span>ديون سابقة</span><span>{formatCurrency(saleDetail.previousDebt)}</span></div>}
+                  <div className="flex justify-between font-semibold text-gray-900"><span>المدفوع</span><span>{formatCurrency(saleDetail.paidAmount)}</span></div>
+                  {saleDetail.remainingDebt > 0 && <div className="flex justify-between font-bold text-base text-gray-900 border-t border-gray-300 pt-1"><span>المتبقي (دين)</span><span>{formatCurrency(saleDetail.remainingDebt)}</span></div>}
                 </div>
-                <p className="text-center text-xs mt-3 text-muted-foreground">الكاشير: {saleDetail.cashierName}</p>
+                <p className="text-center text-sm mt-4 text-gray-600 border-t border-gray-300 pt-3">شكراً لتعاملكم معنا</p>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}><Printer className="w-4 h-4 ml-2" />طباعة</Button>
