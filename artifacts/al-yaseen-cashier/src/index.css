@@ -116,16 +116,38 @@
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 15mm 20mm;
+  }
   body * { visibility: hidden; }
   #print-invoice, #print-invoice * { visibility: visible; }
   #print-invoice {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm;
+    width: 100%;
+    max-width: 170mm;
     direction: rtl;
     font-family: 'Cairo', sans-serif;
-    font-size: 12px;
+    font-size: 14px;
+    padding: 0;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  #print-invoice .print-header {
+    text-align: center;
+    margin-bottom: 10mm;
+    border-bottom: 2px solid #000;
+    padding-bottom: 5mm;
+  }
+  #print-invoice table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  #print-invoice th, #print-invoice td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
   }
   .no-print { display: none !important; }
 }

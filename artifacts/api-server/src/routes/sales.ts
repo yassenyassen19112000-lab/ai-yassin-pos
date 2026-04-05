@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, salesTable, saleItemsTable, productsTable, debtsTable } from "@workspace/db";
-import { eq, and, gte, lte, like } from "drizzle-orm";
+import { eq, and, gte, lte, like, ne } from "drizzle-orm";
 import { requireAuth, AuthenticatedRequest } from "../lib/auth";
 
 const router = Router();
@@ -73,14 +73,17 @@ router.post("/sales", requireAuth, async (req: AuthenticatedRequest, res): Promi
   const paid = parseFloat(paidAmount ?? 0);
 
   let previousDebt = 0;
+  let oldDebtIds: number[] = [];
+
   if (customerName) {
     const customerDebts = await db.select().from(debtsTable)
       .where(and(
         eq(debtsTable.type, "customer"),
         like(debtsTable.customerName, customerName),
+        ne(debtsTable.status, "paid"),
       ));
+    oldDebtIds = customerDebts.map(d => d.id);
     previousDebt = customerDebts
-      .filter(d => d.status !== "paid")
       .reduce((sum, d) => sum + parseFloat(d.remainingAmount as string), 0);
   }
 
@@ -122,6 +125,14 @@ router.post("/sales", requireAuth, async (req: AuthenticatedRequest, res): Promi
     }
   }
 
+  // Mark old debts as settled so they don't get counted again
+  for (const oldId of oldDebtIds) {
+    await db.update(debtsTable)
+      .set({ status: "paid", remainingAmount: "0" })
+      .where(eq(debtsTable.id, oldId));
+  }
+
+  // Create new debt only for the new remaining amount
   if (remainingDebt > 0 && customerName) {
     await db.insert(debtsTable).values({
       type: "customer",

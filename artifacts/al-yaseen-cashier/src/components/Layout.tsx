@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, ShoppingCart, Package, Truck, Receipt,
   CreditCard, FileText, Users, Settings, LogOut, Menu, X,
-  AlertTriangle, ChevronLeft
+  AlertTriangle, ChevronLeft, UserCheck
 } from "lucide-react";
 import { useGetLowStockProducts } from "@workspace/api-client-react";
 
@@ -19,6 +19,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "الرئيسية", icon: LayoutDashboard, permission: "canViewDashboard" },
   { href: "/pos", label: "نقطة البيع", icon: ShoppingCart, permission: "canMakeSales" },
+  { href: "/customers", label: "العملاء", icon: UserCheck, permission: "canMakeSales" },
   { href: "/products", label: "المنتجات", icon: Package, permission: "canManageProducts" },
   { href: "/suppliers", label: "الموردين", icon: Truck, permission: "canManageSuppliers" },
   { href: "/purchases", label: "المشتريات", icon: Receipt, permission: "canViewPurchases" },

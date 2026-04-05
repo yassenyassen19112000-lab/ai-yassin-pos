@@ -5,9 +5,11 @@ import {
   useGetCustomerDebts,
   getListSalesQueryKey,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency, paymentTypeLabel } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { Search, Plus, Minus, Trash2, Printer, MessageCircle, Loader2, ShoppingCart, X, Check } from "lucide-react";
+import { Search, Plus, Minus, Trash2, Printer, MessageCircle, Loader2, ShoppingCart, X, Check, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface CartItem {
@@ -25,6 +27,12 @@ interface CartItem {
   quantity: number;
   sellingPrice: number;
   unit: string;
+}
+
+interface Customer {
+  id: number;
+  name: string;
+  phone: string | null;
 }
 
 export default function POS() {
@@ -40,12 +48,20 @@ export default function POS() {
   const [discountAmount, setDiscountAmount] = useState("0");
   const [notes, setNotes] = useState("");
   const [successSale, setSuccessSale] = useState<any>(null);
+  const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
+  const customerRef = useRef<HTMLDivElement>(null);
 
   const { data: products } = useListProducts({ search: search || undefined });
   const { data: customerDebts } = useGetCustomerDebts(
     { customerName: customerName || "_none_" },
     { query: { enabled: customerName.length > 2 } }
   );
+
+  const { data: customerSuggestions } = useQuery<Customer[]>({
+    queryKey: ["customers", customerName],
+    queryFn: () => apiClient(`/api/customers?search=${encodeURIComponent(customerName)}`),
+    enabled: customerName.length >= 1,
+  });
 
   const customerPendingDebt = (customerDebts ?? []).reduce(
     (sum, d) => sum + d.remainingAmount, 0
@@ -63,6 +79,7 @@ export default function POS() {
       onSuccess: (data) => {
         setSuccessSale(data);
         qc.invalidateQueries({ queryKey: getListSalesQueryKey() });
+        qc.invalidateQueries({ queryKey: ["customers"] });
         setCart([]);
         setCustomerName("");
         setCustomerPhone("");
@@ -71,10 +88,31 @@ export default function POS() {
         setDiscountAmount("0");
         setNotes("");
         toast({ title: "تم إنشاء الفاتورة بنجاح" });
+        // Auto send WhatsApp if customer has a phone
+        const phone = data.customerPhone?.replace(/[^0-9]/g, "") || "";
+        if (phone) {
+          const text = buildWhatsAppText(data);
+          window.open(`https://wa.me/2${phone}?text=${encodeURIComponent(text)}`, "_blank");
+        }
       },
       onError: () => toast({ title: "خطأ في إنشاء الفاتورة", variant: "destructive" }),
     },
   });
+
+  const buildWhatsAppText = (sale: any) => {
+    return `فاتورة من محل آل ياسين لاكسسوار الموتال\n` +
+      `رقم الفاتورة: ${sale.invoiceNumber}\n` +
+      `التاريخ: ${new Date(sale.createdAt).toLocaleDateString("ar-EG")}\n` +
+      `---\n` +
+      sale.items.map((i: any) => `${i.productName} × ${i.quantity} = ${formatCurrency(i.total)}`).join("\n") +
+      `\n---\n` +
+      `الإجمالي: ${formatCurrency(sale.totalAmount)}\n` +
+      (sale.discountAmount > 0 ? `الخصم: ${formatCurrency(sale.discountAmount)}\n` : "") +
+      (sale.previousDebt > 0 ? `ديون سابقة: ${formatCurrency(sale.previousDebt)}\n` : "") +
+      `المدفوع: ${formatCurrency(sale.paidAmount)}\n` +
+      (sale.remainingDebt > 0 ? `المتبقي: ${formatCurrency(sale.remainingDebt)}\n` : "") +
+      `شكراً لتعاملكم معنا`;
+  };
 
   const addToCart = (product: any) => {
     setCart(prev => {
@@ -128,22 +166,27 @@ export default function POS() {
   };
 
   const handleWhatsApp = (sale: any) => {
-    const text = `فاتورة من محل آل ياسين لاكسسوار الموتال\n` +
-      `رقم الفاتورة: ${sale.invoiceNumber}\n` +
-      `التاريخ: ${new Date(sale.createdAt).toLocaleDateString("ar-EG")}\n` +
-      `---\n` +
-      sale.items.map((i: any) => `${i.productName} × ${i.quantity} = ${formatCurrency(i.total)}`).join("\n") +
-      `\n---\n` +
-      `الإجمالي: ${formatCurrency(sale.totalAmount)}\n` +
-      (sale.discountAmount > 0 ? `الخصم: ${formatCurrency(sale.discountAmount)}\n` : "") +
-      (sale.previousDebt > 0 ? `ديون سابقة: ${formatCurrency(sale.previousDebt)}\n` : "") +
-      `المدفوع: ${formatCurrency(sale.paidAmount)}\n` +
-      (sale.remainingDebt > 0 ? `المتبقي: ${formatCurrency(sale.remainingDebt)}\n` : "") +
-      `شكراً لتعاملكم معنا`;
-    const phone = customerPhone?.replace(/[^0-9]/g, "") || "";
+    const text = buildWhatsAppText(sale);
+    const phone = sale.customerPhone?.replace(/[^0-9]/g, "") || "";
     const wa = phone ? `https://wa.me/2${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(wa, "_blank");
   };
+
+  const selectCustomer = (customer: Customer) => {
+    setCustomerName(customer.name);
+    setCustomerPhone(customer.phone || "");
+    setShowCustomerSuggestions(false);
+  };
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (customerRef.current && !customerRef.current.contains(e.target as Node)) {
+        setShowCustomerSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -223,13 +266,40 @@ export default function POS() {
 
           <Card>
             <CardContent className="pt-4 space-y-3">
-              <div>
-                <Label className="text-xs">اسم العميل</Label>
-                <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="اختياري" className="h-8 text-sm" />
+              {/* Customer name with autocomplete */}
+              <div ref={customerRef} className="relative">
+                <Label className="text-xs flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  اسم العميل
+                </Label>
+                <Input
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value);
+                    setShowCustomerSuggestions(true);
+                  }}
+                  onFocus={() => setShowCustomerSuggestions(true)}
+                  placeholder="اكتب اسم العميل..."
+                  className="h-8 text-sm"
+                />
+                {showCustomerSuggestions && customerName.length >= 1 && (customerSuggestions ?? []).length > 0 && (
+                  <div className="absolute z-50 w-full bg-popover border border-border rounded-md shadow-lg mt-1 max-h-40 overflow-y-auto">
+                    {(customerSuggestions ?? []).map((c) => (
+                      <button
+                        key={c.id}
+                        className="w-full text-right px-3 py-2 text-sm hover:bg-muted flex items-center justify-between"
+                        onMouseDown={() => selectCustomer(c)}
+                      >
+                        <span className="font-medium">{c.name}</span>
+                        {c.phone && <span className="text-xs text-muted-foreground" dir="ltr">{c.phone}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <Label className="text-xs">رقم الهاتف</Label>
-                <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="01XXXXXXXXX" className="h-8 text-sm" />
+                <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="01XXXXXXXXX" className="h-8 text-sm" dir="ltr" />
               </div>
               <div>
                 <Label className="text-xs">الخصم (ج.م)</Label>
@@ -299,34 +369,42 @@ export default function POS() {
           </DialogHeader>
           {successSale && (
             <div className="space-y-3">
-              <div id="print-invoice" className="border rounded-lg p-4 text-sm">
-                <div className="text-center mb-3">
-                  <p className="font-bold text-lg">آل ياسين لاكسسوار الموتال</p>
-                  <p className="text-xs text-muted-foreground">{new Date(successSale.createdAt).toLocaleString("ar-EG")}</p>
-                  <p className="text-xs">فاتورة رقم: {successSale.invoiceNumber}</p>
+              <div id="print-invoice" className="border rounded-lg p-5 text-sm">
+                <div className="text-center mb-4 pb-3 border-b-2 border-gray-300">
+                  <p className="font-bold text-xl">آل ياسين لاكسسوار الموتال</p>
+                  <p className="text-sm text-muted-foreground mt-1">{new Date(successSale.createdAt).toLocaleString("ar-EG")}</p>
+                  <p className="text-sm font-mono mt-1">فاتورة رقم: {successSale.invoiceNumber}</p>
                 </div>
-                {successSale.customerName && <p className="text-xs mb-2">العميل: {successSale.customerName}</p>}
-                <div className="space-y-1 mb-3">
+                {successSale.customerName && (
+                  <div className="mb-3 pb-2 border-b">
+                    <p className="font-medium">العميل: {successSale.customerName}</p>
+                    {successSale.customerPhone && <p className="text-sm text-muted-foreground" dir="ltr">{successSale.customerPhone}</p>}
+                  </div>
+                )}
+                <div className="space-y-1.5 mb-4">
                   {successSale.items.map((item: any) => (
-                    <div key={item.id} className="flex justify-between text-xs">
+                    <div key={item.id} className="flex justify-between text-sm">
                       <span>{item.productName} × {item.quantity}</span>
-                      <span>{formatCurrency(item.total)}</span>
+                      <span className="font-medium">{formatCurrency(item.total)}</span>
                     </div>
                   ))}
                 </div>
-                <div className="border-t pt-2 space-y-1 text-xs">
-                  <div className="flex justify-between font-bold"><span>الإجمالي</span><span>{formatCurrency(successSale.totalAmount)}</span></div>
-                  {successSale.discountAmount > 0 && <div className="flex justify-between"><span>الخصم</span><span>- {formatCurrency(successSale.discountAmount)}</span></div>}
-                  {successSale.previousDebt > 0 && <div className="flex justify-between"><span>ديون سابقة</span><span>{formatCurrency(successSale.previousDebt)}</span></div>}
-                  <div className="flex justify-between"><span>المدفوع</span><span>{formatCurrency(successSale.paidAmount)}</span></div>
-                  {successSale.remainingDebt > 0 && <div className="flex justify-between text-red-500 font-bold"><span>المتبقي</span><span>{formatCurrency(successSale.remainingDebt)}</span></div>}
+                <div className="border-t-2 border-gray-300 pt-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between font-bold text-base"><span>الإجمالي</span><span>{formatCurrency(successSale.totalAmount)}</span></div>
+                  {successSale.discountAmount > 0 && <div className="flex justify-between text-green-600"><span>الخصم</span><span>- {formatCurrency(successSale.discountAmount)}</span></div>}
+                  {successSale.previousDebt > 0 && <div className="flex justify-between text-red-500"><span>ديون سابقة</span><span>{formatCurrency(successSale.previousDebt)}</span></div>}
+                  <div className="flex justify-between text-green-600 font-semibold"><span>المدفوع</span><span>{formatCurrency(successSale.paidAmount)}</span></div>
+                  {successSale.remainingDebt > 0 && <div className="flex justify-between text-red-500 font-bold text-base"><span>المتبقي (دين)</span><span>{formatCurrency(successSale.remainingDebt)}</span></div>}
                 </div>
-                <p className="text-center text-xs mt-3 text-muted-foreground">شكراً لتعاملكم معنا</p>
+                <p className="text-center text-sm mt-4 text-muted-foreground border-t pt-3">شكراً لتعاملكم معنا</p>
               </div>
+              {successSale.customerPhone && (
+                <p className="text-xs text-green-600 text-center">✓ تم فتح واتساب تلقائياً لإرسال الفاتورة</p>
+              )}
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={handlePrint}>
                   <Printer className="w-4 h-4 ml-2" />
-                  طباعة
+                  طباعة A4
                 </Button>
                 <Button variant="outline" className="flex-1 text-green-600 border-green-300 hover:bg-green-50" onClick={() => handleWhatsApp(successSale)}>
                   <MessageCircle className="w-4 h-4 ml-2" />

@@ -6,16 +6,20 @@ import {
   useListProducts,
   getListPurchasesQueryKey,
 } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency, formatDateTime, paymentTypeLabel } from "@/lib/utils";
+import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Separator } from "@/components/ui/separator";
 import { Plus, Loader2, Trash2, Receipt } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -32,18 +36,27 @@ export default function Purchases() {
   const [selectedProduct, setSelectedProduct] = useState("");
   const [itemQty, setItemQty] = useState("1");
   const [itemPrice, setItemPrice] = useState("");
+  const [includeExistingDebt, setIncludeExistingDebt] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
   const { data: purchases, isLoading } = useListPurchases({});
   const { data: suppliers } = useListSuppliers();
   const { data: products } = useListProducts({});
+
+  const { data: supplierPendingDebt } = useQuery<{ pendingDebt: number; debtIds: number[] }>({
+    queryKey: ["supplier-pending-debt", supplierId],
+    queryFn: () => apiClient(`/api/suppliers/${supplierId}/pending-debt`),
+    enabled: !!supplierId,
+  });
+
   const createMutation = useCreatePurchase({
     mutation: {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
         setShowForm(false);
         setSupplierId(""); setInvoiceNumber(""); setPaymentType("cash"); setPaidAmount("0"); setNotes(""); setItems([]);
+        setIncludeExistingDebt(false);
         toast({ title: "تم تسجيل المشترى" });
       },
       onError: () => toast({ title: "خطأ في التسجيل", variant: "destructive" }),
@@ -57,7 +70,9 @@ export default function Purchases() {
     setSelectedProduct(""); setItemQty("1"); setItemPrice("");
   };
 
-  const total = items.reduce((s, i) => s + i.quantity * i.costPrice, 0);
+  const itemsTotal = items.reduce((s, i) => s + i.quantity * i.costPrice, 0);
+  const previousDebt = (includeExistingDebt && supplierPendingDebt) ? supplierPendingDebt.pendingDebt : 0;
+  const grandTotal = itemsTotal + previousDebt;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +85,15 @@ export default function Purchases() {
         paidAmount: parseFloat(paidAmount),
         notes: notes || undefined,
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity, costPrice: i.costPrice })),
-      },
+        includeExistingDebt,
+      } as any,
     });
+  };
+
+  const resetForm = () => {
+    setShowForm(false);
+    setSupplierId(""); setInvoiceNumber(""); setPaymentType("cash"); setPaidAmount("0"); setNotes(""); setItems([]);
+    setIncludeExistingDebt(false);
   };
 
   return (
@@ -115,17 +137,22 @@ export default function Purchases() {
         </Card>
       )}
 
-      <Dialog open={showForm} onOpenChange={setShowForm}>
+      <Dialog open={showForm} onOpenChange={resetForm}>
         <DialogContent className="max-w-2xl" dir="rtl">
           <DialogHeader><DialogTitle>تسجيل مشترى جديد</DialogTitle></DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>المورد *</Label>
-                <Select value={supplierId} onValueChange={setSupplierId}>
+                <Select value={supplierId} onValueChange={(v) => { setSupplierId(v); setIncludeExistingDebt(false); }}>
                   <SelectTrigger><SelectValue placeholder="اختر المورد" /></SelectTrigger>
                   <SelectContent>
-                    {(suppliers ?? []).map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>)}
+                    {(suppliers ?? []).map(s => (
+                      <SelectItem key={s.id} value={s.id.toString()}>
+                        {s.name}
+                        {s.totalDebt > 0 && <span className="text-red-500 text-xs mr-2">({formatCurrency(s.totalDebt)} دين)</span>}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -143,6 +170,24 @@ export default function Purchases() {
               </div>
               <div><Label>المبلغ المدفوع</Label><Input type="number" step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} /></div>
             </div>
+
+            {supplierId && supplierPendingDebt && supplierPendingDebt.pendingDebt > 0 && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                <p className="text-orange-700 font-medium text-sm mb-2">
+                  يوجد دين سابق لهذا المورد: <span className="font-bold">{formatCurrency(supplierPendingDebt.pendingDebt)}</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="includeDebt"
+                    checked={includeExistingDebt}
+                    onCheckedChange={(v) => setIncludeExistingDebt(!!v)}
+                  />
+                  <label htmlFor="includeDebt" className="text-sm cursor-pointer">
+                    إضافة الدين السابق لهذه الفاتورة وتسويته
+                  </label>
+                </div>
+              </div>
+            )}
 
             <div>
               <Label>المنتجات</Label>
@@ -164,7 +209,15 @@ export default function Purchases() {
                       <button type="button" onClick={() => setItems(prev => prev.filter((_, j) => j !== i))} className="text-destructive mr-2"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   ))}
-                  <div className="text-left font-bold text-sm px-3">الإجمالي: {formatCurrency(total)}</div>
+                  <div className="border-t pt-2 space-y-1 text-sm">
+                    <div className="flex justify-between"><span className="text-muted-foreground">إجمالي المشتريات</span><span className="font-bold">{formatCurrency(itemsTotal)}</span></div>
+                    {includeExistingDebt && previousDebt > 0 && (
+                      <div className="flex justify-between text-orange-600"><span>الدين السابق</span><span className="font-bold">+ {formatCurrency(previousDebt)}</span></div>
+                    )}
+                    {(includeExistingDebt && previousDebt > 0) && (
+                      <div className="flex justify-between font-bold text-base border-t pt-1"><span>الإجمالي الكلي</span><span className="text-primary">{formatCurrency(grandTotal)}</span></div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -172,7 +225,7 @@ export default function Purchases() {
             <div><Label>ملاحظات</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
 
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>إلغاء</Button>
+              <Button type="button" variant="outline" onClick={resetForm}>إلغاء</Button>
               <Button type="submit" disabled={createMutation.isPending}>{createMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}تسجيل</Button>
             </div>
           </form>
