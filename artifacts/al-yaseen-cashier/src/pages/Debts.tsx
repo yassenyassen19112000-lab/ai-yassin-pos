@@ -4,7 +4,8 @@ import {
   useAddDebtPayment,
   getListDebtsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api";
 import { formatCurrency, formatDateTime, debtStatusLabel, debtStatusColor } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ function DebtCard({ debt, onPay }: { debt: any; onPay: (debt: any) => void }) {
           <div>
             <p className="font-semibold">{debt.customerName || debt.supplierName || "غير محدد"}</p>
             {debt.customerPhone && <p className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{debt.customerPhone}</p>}
+            {debt.notes && <p className="text-xs text-muted-foreground mt-0.5">{debt.notes}</p>}
             <p className="text-xs text-muted-foreground">{formatDateTime(debt.createdAt)}</p>
           </div>
           <Badge className={`text-xs border ${debtStatusColor(debt.status)}`}>
@@ -73,11 +75,29 @@ export default function Debts() {
   const [payingDebt, setPayingDebt] = useState<any>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payNotes, setPayNotes] = useState("");
+  const [addDebtOpen, setAddDebtOpen] = useState(false);
+  const [addDebtType, setAddDebtType] = useState<"customer" | "supplier">("customer");
+  const [selectedParty, setSelectedParty] = useState<any>(null);
+  const [debtAmount, setDebtAmount] = useState("");
+  const [debtNotes, setDebtNotes] = useState("");
+  const [partySearch, setPartySearch] = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
   const { data: customerDebts, isLoading: loadingCustomer } = useListDebts({ type: "customer" });
   const { data: supplierDebts, isLoading: loadingSupplier } = useListDebts({ type: "supplier" });
+
+  const { data: customers } = useQuery<any[]>({
+    queryKey: ["customers"],
+    queryFn: () => apiClient("/api/customers"),
+    enabled: addDebtOpen && addDebtType === "customer",
+  });
+
+  const { data: suppliers } = useQuery<any[]>({
+    queryKey: ["suppliers"],
+    queryFn: () => apiClient("/api/suppliers"),
+    enabled: addDebtOpen && addDebtType === "supplier",
+  });
 
   const payMutation = useAddDebtPayment({
     mutation: {
@@ -92,17 +112,61 @@ export default function Debts() {
     },
   });
 
+  const addDebtMutation = useMutation({
+    mutationFn: (data: any) => apiClient("/api/debts", { method: "POST", body: JSON.stringify(data) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getListDebtsQueryKey() });
+      setAddDebtOpen(false);
+      resetAddForm();
+      toast({ title: "تم تسجيل الدين بنجاح" });
+    },
+    onError: () => toast({ title: "خطأ في تسجيل الدين", variant: "destructive" }),
+  });
+
+  const resetAddForm = () => {
+    setSelectedParty(null);
+    setDebtAmount("");
+    setDebtNotes("");
+    setPartySearch("");
+  };
+
   const handlePay = () => {
     if (!payAmount || parseFloat(payAmount) <= 0) return;
     payMutation.mutate({ id: payingDebt.id, data: { amount: parseFloat(payAmount), notes: payNotes || undefined } });
   };
 
+  const handleAddDebt = () => {
+    if (!selectedParty) { toast({ title: "اختر العميل أو المورد", variant: "destructive" }); return; }
+    if (!debtAmount || parseFloat(debtAmount) <= 0) { toast({ title: "أدخل مبلغ الدين", variant: "destructive" }); return; }
+
+    addDebtMutation.mutate({
+      type: addDebtType,
+      customerName: addDebtType === "customer" ? selectedParty.name : undefined,
+      customerPhone: addDebtType === "customer" ? (selectedParty.phone || undefined) : undefined,
+      supplierId: addDebtType === "supplier" ? selectedParty.id : undefined,
+      totalAmount: parseFloat(debtAmount),
+      paidAmount: 0,
+      notes: debtNotes.trim() || undefined,
+    });
+  };
+
   const totalCustomerDebt = (customerDebts ?? []).filter(d => d.status !== "paid").reduce((s, d) => s + d.remainingAmount, 0);
   const totalSupplierDebt = (supplierDebts ?? []).filter(d => d.status !== "paid").reduce((s, d) => s + d.remainingAmount, 0);
 
+  const partyList = addDebtType === "customer" ? (customers ?? []) : (suppliers ?? []);
+  const filteredPartyList = partySearch
+    ? partyList.filter((p: any) => p.name.includes(partySearch))
+    : partyList;
+
   return (
     <div className="space-y-4" dir="rtl">
-      <h1 className="text-2xl font-bold">الديون</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">الديون</h1>
+        <Button onClick={() => { resetAddForm(); setAddDebtOpen(true); setAddDebtType("customer"); }}>
+          <Plus className="w-4 h-4 ml-2" />
+          تسجيل دين جديد
+        </Button>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Card className="bg-red-50 border-red-200">
@@ -154,6 +218,7 @@ export default function Debts() {
         </TabsContent>
       </Tabs>
 
+      {/* Pay debt dialog */}
       <Dialog open={!!payingDebt} onOpenChange={() => setPayingDebt(null)}>
         <DialogContent dir="rtl">
           <DialogHeader><DialogTitle>تسجيل دفعة</DialogTitle></DialogHeader>
@@ -165,18 +230,11 @@ export default function Debts() {
               </div>
               <div>
                 <Label>المبلغ المدفوع *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  placeholder="أدخل المبلغ"
-                  max={payingDebt.remainingAmount}
-                />
+                <Input type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="أدخل المبلغ" max={payingDebt.remainingAmount} autoFocus />
               </div>
               <div>
                 <Label>ملاحظات</Label>
-                <Input value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />
+                <Input value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="اختياري" />
               </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setPayingDebt(null)}>إلغاء</Button>
@@ -187,6 +245,129 @@ export default function Debts() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add new debt dialog */}
+      <Dialog open={addDebtOpen} onOpenChange={(open) => { if (!open) { setAddDebtOpen(false); resetAddForm(); } }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-orange-500" />
+              تسجيل دين جديد
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Type selector */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { setAddDebtType("customer"); setSelectedParty(null); setPartySearch(""); }}
+                className={`py-2.5 rounded-lg border text-sm font-medium transition-colors ${addDebtType === "customer" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+              >
+                دين على عميل
+              </button>
+              <button
+                onClick={() => { setAddDebtType("supplier"); setSelectedParty(null); setPartySearch(""); }}
+                className={`py-2.5 rounded-lg border text-sm font-medium transition-colors ${addDebtType === "supplier" ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+              >
+                دين لمورد
+              </button>
+            </div>
+
+            {/* Party selection */}
+            <div>
+              <Label className="mb-1.5 block">{addDebtType === "customer" ? "اختر العميل" : "اختر المورد"} *</Label>
+
+              {selectedParty ? (
+                <div className="flex items-center justify-between bg-primary/5 border border-primary/20 rounded-lg px-3 py-2.5">
+                  <div>
+                    <p className="font-semibold text-sm">{selectedParty.name}</p>
+                    {selectedParty.phone && <p className="text-xs text-muted-foreground" dir="ltr">{selectedParty.phone}</p>}
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => { setSelectedParty(null); setPartySearch(""); }}>
+                    تغيير
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Input
+                    placeholder={`ابحث باسم ${addDebtType === "customer" ? "العميل" : "المورد"}...`}
+                    value={partySearch}
+                    onChange={e => setPartySearch(e.target.value)}
+                    className="h-9"
+                    autoFocus
+                  />
+                  <div className="max-h-44 overflow-y-auto border rounded-lg divide-y">
+                    {filteredPartyList.length === 0 ? (
+                      <p className="text-center text-sm text-muted-foreground py-4">
+                        {addDebtType === "customer" ? "لا يوجد عملاء" : "لا يوجد موردين"}
+                      </p>
+                    ) : (
+                      filteredPartyList.map((p: any) => (
+                        <button
+                          key={p.id}
+                          className="w-full text-right px-3 py-2.5 hover:bg-muted transition-colors text-sm flex items-center justify-between"
+                          onClick={() => setSelectedParty(p)}
+                        >
+                          <span className="font-medium">{p.name}</span>
+                          {p.phone && <span className="text-xs text-muted-foreground" dir="ltr">{p.phone}</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Amount */}
+            <div>
+              <Label>مبلغ الدين (ج.م) *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={debtAmount}
+                onChange={e => setDebtAmount(e.target.value)}
+                placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+
+            {/* Notes */}
+            <div>
+              <Label>ملاحظات <span className="text-muted-foreground text-xs">(اختياري)</span></Label>
+              <Input
+                value={debtNotes}
+                onChange={e => setDebtNotes(e.target.value)}
+                placeholder="سبب الدين أو تفاصيل إضافية"
+                className="mt-1"
+              />
+            </div>
+
+            {/* Preview */}
+            {selectedParty && debtAmount && parseFloat(debtAmount) > 0 && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm">
+                <p className="text-orange-700">
+                  سيتم تسجيل دين قيمته{" "}
+                  <span className="font-bold">{formatCurrency(parseFloat(debtAmount))}</span>{" "}
+                  {addDebtType === "customer" ? "على العميل" : "للمورد"}{" "}
+                  <span className="font-bold">{selectedParty.name}</span>
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { setAddDebtOpen(false); resetAddForm(); }}>إلغاء</Button>
+              <Button
+                onClick={handleAddDebt}
+                disabled={addDebtMutation.isPending || !selectedParty || !debtAmount}
+                className="bg-orange-500 hover:bg-orange-600 text-white"
+              >
+                {addDebtMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                تسجيل الدين
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

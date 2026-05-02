@@ -138,6 +138,7 @@ export default function Sales() {
                 <TableHead className="text-right">الإجمالي</TableHead>
                 <TableHead className="text-right">المدفوع</TableHead>
                 <TableHead className="text-right">المتبقي</TableHead>
+                <TableHead className="text-right">دين سابق</TableHead>
                 <TableHead className="text-right">النوع</TableHead>
                 <TableHead className="text-right">التاريخ</TableHead>
                 <TableHead className="text-right"></TableHead>
@@ -151,6 +152,7 @@ export default function Sales() {
                   <TableCell className="font-bold">{formatCurrency(s.totalAmount)}</TableCell>
                   <TableCell className="text-green-600">{formatCurrency(s.paidAmount)}</TableCell>
                   <TableCell className={s.remainingDebt > 0 ? "text-red-500 font-bold" : "text-muted-foreground"}>{formatCurrency(s.remainingDebt)}</TableCell>
+                  <TableCell className={s.previousDebt > 0 ? "text-orange-500 text-xs font-medium" : "text-muted-foreground text-xs"}>{s.previousDebt > 0 ? formatCurrency(s.previousDebt) : "—"}</TableCell>
                   <TableCell><Badge variant="outline">{paymentTypeLabel(s.paymentType)}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-xs">{formatDateTime(s.createdAt)}</TableCell>
                   <TableCell>
@@ -221,6 +223,12 @@ export default function Sales() {
                     <div className="flex justify-between text-gray-700">
                       <span>خصم</span>
                       <span className="text-green-700">- {formatCurrency(saleDetail.discountAmount)}</span>
+                    </div>
+                  )}
+                  {saleDetail.previousDebt > 0 && (
+                    <div className="flex justify-between text-gray-800">
+                      <span>ديون سابقة مضافة</span>
+                      <span>+ {formatCurrency(saleDetail.previousDebt)}</span>
                     </div>
                   )}
                   <div className="flex justify-between font-semibold text-gray-900">
