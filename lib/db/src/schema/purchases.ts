@@ -25,6 +25,17 @@ export const purchaseItemsTable = pgTable("purchase_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const purchaseReturnsTable = pgTable("purchase_returns", {
+  id: serial("id").primaryKey(),
+  purchaseId: integer("purchase_id").notNull(),
+  returnNumber: text("return_number").notNull(),
+  returnAmount: numeric("return_amount", { precision: 10, scale: 2 }).notNull(),
+  reason: text("reason"),
+  cashierName: text("cashier_name").notNull().default("كاشير"),
+  items: text("items").notNull().default("[]"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertPurchaseSchema = createInsertSchema(purchasesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertPurchase = z.infer<typeof insertPurchaseSchema>;
 export type Purchase = typeof purchasesTable.$inferSelect;

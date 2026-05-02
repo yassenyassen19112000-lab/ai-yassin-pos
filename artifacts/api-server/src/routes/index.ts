@@ -11,6 +11,7 @@ import dashboardRouter from "./dashboard";
 import customersRouter from "./customers";
 import expensesRouter from "./expenses";
 import returnsRouter from "./returns";
+import purchaseReturnsRouter from "./purchase-returns";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(dashboardRouter);
 router.use(customersRouter);
 router.use(expensesRouter);
 router.use(returnsRouter);
+router.use(purchaseReturnsRouter);
 
 export default router;
