@@ -12,6 +12,7 @@ export const permissionsSchema = z.object({
   canManageDebts: z.boolean().default(false),
   canViewPurchases: z.boolean().default(false),
   canCreatePurchases: z.boolean().default(false),
+  canManageExpenses: z.boolean().default(false),
 });
 
 export type Permissions = z.infer<typeof permissionsSchema>;

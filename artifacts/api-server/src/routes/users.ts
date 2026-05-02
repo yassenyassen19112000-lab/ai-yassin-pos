@@ -59,13 +59,17 @@ router.get("/users/:id", requireAuth, requireAdmin, async (req, res): Promise<vo
 
 router.patch("/users/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
   const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
-  const { username, password, name, role } = req.body;
+  const { username, password, name, role, permissions } = req.body;
   
   const updates: Partial<typeof usersTable.$inferInsert> = {};
   if (username) updates.username = username;
   if (name) updates.name = name;
   if (role) updates.role = role;
   if (password) updates.passwordHash = await bcrypt.hash(password, 10);
+  if (permissions) {
+    const parsed = permissionsSchema.safeParse(permissions);
+    if (parsed.success) updates.permissions = parsed.data;
+  }
 
   const [user] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning();
   if (!user) { res.status(404).json({ error: "المستخدم غير موجود" }); return; }

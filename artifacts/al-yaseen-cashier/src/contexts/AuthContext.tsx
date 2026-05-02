@@ -11,6 +11,7 @@ interface Permissions {
   canManageDebts: boolean;
   canViewPurchases: boolean;
   canCreatePurchases: boolean;
+  canManageExpenses: boolean;
 }
 
 interface User {

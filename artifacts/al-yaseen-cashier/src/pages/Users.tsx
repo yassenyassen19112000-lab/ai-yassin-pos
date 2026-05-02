@@ -34,6 +34,7 @@ const defaultPermissions = {
   canManageDebts: false,
   canViewPurchases: false,
   canCreatePurchases: false,
+  canManageExpenses: false,
 };
 
 const permissionLabels: Record<string, string> = {
@@ -46,6 +47,7 @@ const permissionLabels: Record<string, string> = {
   canManageDebts: "إدارة الديون",
   canViewPurchases: "عرض المشتريات",
   canCreatePurchases: "تسجيل مشتريات",
+  canManageExpenses: "إدارة المصروفات",
 };
 
 const emptyForm: UserForm = { username: "", password: "", name: "", role: "cashier", permissions: { ...defaultPermissions } };

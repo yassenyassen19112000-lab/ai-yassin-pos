@@ -15,6 +15,7 @@ import Reports from "@/pages/Reports";
 import Users from "@/pages/Users";
 import Settings from "@/pages/Settings";
 import Customers from "@/pages/Customers";
+import Expenses from "@/pages/Expenses";
 import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient({
@@ -63,6 +64,7 @@ function AppRoutes() {
         <Route path="/users" component={Users} />
         <Route path="/settings" component={Settings} />
         <Route path="/customers" component={Customers} />
+        <Route path="/expenses" component={Expenses} />
         <Route><Redirect to="/dashboard" /></Route>
       </Switch>
     </Layout>

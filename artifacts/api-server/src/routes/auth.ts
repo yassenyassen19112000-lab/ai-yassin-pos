@@ -19,6 +19,7 @@ const DEFAULT_ADMIN_PERMISSIONS = {
   canManageDebts: true,
   canViewPurchases: true,
   canCreatePurchases: true,
+  canManageExpenses: true,
 };
 
 const DEFAULT_CASHIER_PERMISSIONS = {
@@ -31,6 +32,7 @@ const DEFAULT_CASHIER_PERMISSIONS = {
   canManageDebts: false,
   canViewPurchases: false,
   canCreatePurchases: false,
+  canManageExpenses: false,
 };
 
 async function ensureAdminExists() {
