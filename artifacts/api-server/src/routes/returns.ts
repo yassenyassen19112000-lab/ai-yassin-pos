@@ -75,22 +75,29 @@ router.post("/sales/:id/return", requireAuth, async (req: AuthenticatedRequest, 
     VALUES (${saleId}, ${generateReturnNumber()}, ${returnAmount}, ${reason || null}, ${req.userName || "كاشير"}, ${JSON.stringify(returnItems)}::jsonb)
   `);
 
-  // If there's a remaining customer debt for this sale, reduce it
+  // ── Update sale's remainingDebt (allow negative = refund due) ────────────
+  const currentRemaining = parseFloat(sale.remainingDebt as string);
+  const newRemainingDebt = currentRemaining - returnAmount; // can be negative
+  await db.update(salesTable)
+    .set({ remainingDebt: newRemainingDebt.toString() })
+    .where(eq(salesTable.id, saleId));
+
+  // ── If there's a linked debt record for this sale, reduce it too ─────────
   if (sale.customerName && returnAmount > 0) {
     const saleDebts = await db.select().from(debtsTable)
       .where(and(
         eq(debtsTable.saleId, saleId),
         ne(debtsTable.status, "paid")
       ));
-    
+
     for (const debt of saleDebts) {
-      const currentRemaining = parseFloat(debt.remainingAmount as string);
-      const newRemaining = Math.max(0, currentRemaining - returnAmount);
-      const newStatus = newRemaining <= 0 ? "paid" : "partial";
+      const debtRemaining = parseFloat(debt.remainingAmount as string);
+      const newDebtRemaining = Math.max(0, debtRemaining - returnAmount);
+      const newStatus = newDebtRemaining <= 0 ? "paid" : "partial";
       await db.update(debtsTable)
         .set({
-          remainingAmount: newRemaining.toString(),
-          paidAmount: (parseFloat(debt.paidAmount as string) + Math.min(returnAmount, currentRemaining)).toString(),
+          remainingAmount: newDebtRemaining.toString(),
+          paidAmount: (parseFloat(debt.paidAmount as string) + Math.min(returnAmount, debtRemaining)).toString(),
           status: newStatus,
         })
         .where(eq(debtsTable.id, debt.id));
@@ -104,6 +111,7 @@ router.post("/sales/:id/return", requireAuth, async (req: AuthenticatedRequest, 
     saleTotal: parseFloat(sale.totalAmount as string),
     previousDebt: parseFloat(sale.previousDebt as string),
     paidAmount: parseFloat(sale.paidAmount as string),
+    newRemainingDebt,
   });
 });
 

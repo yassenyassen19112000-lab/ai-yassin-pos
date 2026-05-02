@@ -270,11 +270,9 @@ export default function Sales() {
                     <span>المدفوع</span>
                     <span>{formatCurrency(saleDetail.paidAmount)}</span>
                   </div>
-                  {/* Net balance — positive means customer owes us, negative means we owe customer */}
+                  {/* Net balance — read from DB remainingDebt which is updated on every return */}
                   {(() => {
-                    const grandTotal = saleDetail.totalAmount + saleDetail.previousDebt - saleDetail.discountAmount;
-                    // net = what is still owed after paying; positive = customer owes, negative = store owes refund
-                    const net = grandTotal - saleDetail.paidAmount;
+                    const net = parseFloat(saleDetail.remainingDebt ?? 0);
                     if (net > 0.005) {
                       return (
                         <div className="flex justify-between font-bold text-base text-red-700 border-t border-gray-300 pt-1">
