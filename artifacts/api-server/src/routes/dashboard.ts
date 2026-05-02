@@ -75,42 +75,64 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
   const allProducts = await db.select().from(productsTable);
   const lowStock = allProducts.filter(p => p.quantity <= p.minStockLevel);
 
-  // Profit calculation: revenue - COGS - expenses - returns impact
+  // ── Profit: cash-basis (only collected revenue counts) ───────────────────
+  // Revenue = paidAmount for each sale (not the full invoiced totalAmount)
+  // COGS    = proportional to collection rate (paidAmount / totalAmount * fullCOGS)
+  // This ensures unpaid invoices (debts) don't inflate profits
   const allSaleItems = await db.select().from(saleItemsTable);
   const productMap = new Map(allProducts.map(p => [p.id, p]));
-  
-  const saleIdsThisMonth = (await db.select({ id: salesTable.id }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth))).map(s => s.id);
-  const saleIdSet = new Set(saleIdsThisMonth);
-  
-  let grossProfitMonth = 0;
+
+  const salesThisMonth = await db.select().from(salesTable).where(gte(salesTable.createdAt, startOfMonth));
+  const saleIdSet = new Set(salesThisMonth.map(s => s.id));
+  // Map saleId → collection rate (paid / total)
+  const saleCollectionRate = new Map(salesThisMonth.map(s => {
+    const total = parseFloat(s.totalAmount as string);
+    const paid  = parseFloat(s.paidAmount  as string);
+    return [s.id, total > 0 ? Math.min(1, paid / total) : 0];
+  }));
+
+  let collectedRevenue = 0;
+  let proportionalCOGS = 0;
   for (const item of allSaleItems) {
     if (!saleIdSet.has(item.saleId)) continue;
     const product = productMap.get(item.productId);
-    if (product) {
-      grossProfitMonth += parseFloat(item.total as string) - (parseFloat(product.costPrice as string) * item.quantity);
-    }
+    const rate = saleCollectionRate.get(item.saleId) ?? 0;
+    const itemRevenue = parseFloat(item.total as string);
+    const itemCOGS   = product ? parseFloat(product.costPrice as string) * item.quantity : 0;
+    collectedRevenue += itemRevenue * rate;
+    proportionalCOGS += itemCOGS   * rate;
   }
 
-  // Returns this month: calculate their gross profit impact (returned items reduce revenue AND cogs)
+  // Returns this month: reduce collected revenue AND proportional COGS
   const returnsThisMonthItems = await db.execute(
-    sql`SELECT items FROM sales_returns sr JOIN sales s ON sr.sale_id = s.id WHERE s.created_at >= ${startOfMonth}`
+    sql`SELECT sr.items, s.paid_amount, s.total_amount
+        FROM sales_returns sr JOIN sales s ON sr.sale_id = s.id
+        WHERE s.created_at >= ${startOfMonth}`
   );
-  let returnsGrossImpact = 0;
+  let returnsRevenueImpact = 0;
+  let returnsCOGSImpact = 0;
   for (const row of returnsThisMonthItems.rows as any[]) {
+    const rate = row.total_amount > 0 ? Math.min(1, row.paid_amount / row.total_amount) : 0;
     const items = Array.isArray(row.items) ? row.items : [];
     for (const ri of items) {
       const product = productMap.get(ri.productId);
-      if (product) {
-        const costPerUnit = parseFloat(product.costPrice as string);
-        const sellingPerUnit = ri.sellingPrice ?? ri.total / ri.quantity;
-        returnsGrossImpact += (sellingPerUnit - costPerUnit) * ri.quantity;
-      }
+      const retRevenue = ri.total ?? (ri.sellingPrice ?? 0) * ri.quantity;
+      const retCOGS    = product ? parseFloat(product.costPrice as string) * ri.quantity : 0;
+      returnsRevenueImpact += retRevenue * rate;
+      returnsCOGSImpact    += retCOGS    * rate;
     }
   }
 
   const expensesMonthTotal = parseFloat(expensesMonth.total ?? "0");
-  // Net profit = gross profit - returns gross impact - expenses
+  // Net profit = (collected revenue - proportional COGS) - returns margin - expenses
+  const grossProfitMonth = collectedRevenue - proportionalCOGS;
+  const returnsGrossImpact = returnsRevenueImpact - returnsCOGSImpact;
   const profitMonth = grossProfitMonth - returnsGrossImpact - expensesMonthTotal;
+
+  // Pending (uncollected) this month = invoiced but not yet paid
+  const pendingDebtsMonth = salesThisMonth.reduce((s, sale) => {
+    return s + Math.max(0, parseFloat(sale.totalAmount as string) - parseFloat(sale.paidAmount as string));
+  }, 0);
 
   // Financial position (all-time)
   const totalCollected = parseFloat(salesAll.paidAmount ?? "0"); // cash received from customers
@@ -134,6 +156,7 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
     totalExpensesMonth: parseFloat(expensesMonth.total ?? "0"),
     totalReturnsMonth: returnsMonthTotal,
     totalProfitMonth: profitMonth,
+    pendingDebtsMonth,
     // All-time
     totalCollected,
     totalPurchasesPaid,

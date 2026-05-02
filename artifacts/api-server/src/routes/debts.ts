@@ -57,10 +57,8 @@ router.post("/debts", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const total = parseFloat(totalAmount);
+  const addedAmount = parseFloat(totalAmount);
   const paid = parseFloat(paidAmount ?? 0);
-  const remaining = total - paid;
-  const status = remaining <= 0 ? "paid" : paid > 0 ? "partial" : "pending";
 
   let supplierName = null;
   if (supplierId) {
@@ -68,13 +66,52 @@ router.post("/debts", requireAuth, async (req, res): Promise<void> => {
     supplierName = supplier?.name ?? null;
   }
 
+  // ── Check for existing open debt for the same customer/supplier ──────────
+  // Only merge when this is a manual debt (no saleId/purchaseId linkage)
+  if (!saleId && !purchaseId) {
+    let existing: typeof debtsTable.$inferSelect | undefined;
+
+    if (type === "customer" && customerName) {
+      const rows = await db.select().from(debtsTable)
+        .where(and(eq(debtsTable.type, "customer"), like(debtsTable.customerName, customerName)));
+      existing = rows.find(d => d.status !== "paid");
+    } else if (type === "supplier" && supplierId) {
+      const rows = await db.select().from(debtsTable)
+        .where(and(eq(debtsTable.type, "supplier"), eq(debtsTable.supplierId, supplierId)));
+      existing = rows.find(d => d.status !== "paid");
+    }
+
+    if (existing) {
+      // Add the new amount to the existing debt record
+      const newTotal = parseFloat(existing.totalAmount as string) + addedAmount;
+      const newPaid = parseFloat(existing.paidAmount as string) + paid;
+      const newRemaining = Math.max(0, newTotal - newPaid);
+      const newStatus = newRemaining <= 0 ? "paid" : newPaid > 0 ? "partial" : "pending";
+      const mergedNotes = [existing.notes, notes].filter(Boolean).join(" | ") || null;
+
+      const [updated] = await db.update(debtsTable).set({
+        totalAmount: newTotal.toString(),
+        paidAmount: newPaid.toString(),
+        remainingAmount: newRemaining.toString(),
+        status: newStatus,
+        notes: mergedNotes,
+      }).where(eq(debtsTable.id, existing.id)).returning();
+
+      return res.status(200).json(await formatDebt(updated));
+    }
+  }
+
+  // ── No existing record → create new ─────────────────────────────────────
+  const remaining = addedAmount - paid;
+  const status = remaining <= 0 ? "paid" : paid > 0 ? "partial" : "pending";
+
   const [debt] = await db.insert(debtsTable).values({
     type,
     customerName: customerName || null,
     customerPhone: customerPhone || null,
     supplierId: supplierId || null,
     supplierName,
-    totalAmount: total.toString(),
+    totalAmount: addedAmount.toString(),
     paidAmount: paid.toString(),
     remainingAmount: remaining.toString(),
     status,
