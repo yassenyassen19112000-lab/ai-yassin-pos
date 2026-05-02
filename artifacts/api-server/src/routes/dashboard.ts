@@ -75,21 +75,42 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
   const allProducts = await db.select().from(productsTable);
   const lowStock = allProducts.filter(p => p.quantity <= p.minStockLevel);
 
-  // Profit calculation: (sales revenue - cost of goods sold)
+  // Profit calculation: revenue - COGS - expenses - returns impact
   const allSaleItems = await db.select().from(saleItemsTable);
   const productMap = new Map(allProducts.map(p => [p.id, p]));
   
   const saleIdsThisMonth = (await db.select({ id: salesTable.id }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth))).map(s => s.id);
   const saleIdSet = new Set(saleIdsThisMonth);
   
-  let profitMonth = 0;
+  let grossProfitMonth = 0;
   for (const item of allSaleItems) {
     if (!saleIdSet.has(item.saleId)) continue;
     const product = productMap.get(item.productId);
     if (product) {
-      profitMonth += parseFloat(item.total as string) - (parseFloat(product.costPrice as string) * item.quantity);
+      grossProfitMonth += parseFloat(item.total as string) - (parseFloat(product.costPrice as string) * item.quantity);
     }
   }
+
+  // Returns this month: calculate their gross profit impact (returned items reduce revenue AND cogs)
+  const returnsThisMonthItems = await db.execute(
+    sql`SELECT items FROM sales_returns sr JOIN sales s ON sr.sale_id = s.id WHERE s.created_at >= ${startOfMonth}`
+  );
+  let returnsGrossImpact = 0;
+  for (const row of returnsThisMonthItems.rows as any[]) {
+    const items = Array.isArray(row.items) ? row.items : [];
+    for (const ri of items) {
+      const product = productMap.get(ri.productId);
+      if (product) {
+        const costPerUnit = parseFloat(product.costPrice as string);
+        const sellingPerUnit = ri.sellingPrice ?? ri.total / ri.quantity;
+        returnsGrossImpact += (sellingPerUnit - costPerUnit) * ri.quantity;
+      }
+    }
+  }
+
+  const expensesMonthTotal = parseFloat(expensesMonth.total ?? "0");
+  // Net profit = gross profit - returns gross impact - expenses
+  const profitMonth = grossProfitMonth - returnsGrossImpact - expensesMonthTotal;
 
   // Financial position (all-time)
   const totalCollected = parseFloat(salesAll.paidAmount ?? "0"); // cash received from customers

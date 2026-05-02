@@ -101,6 +101,9 @@ router.post("/sales/:id/return", requireAuth, async (req: AuthenticatedRequest, 
     returnAmount,
     items: returnItems,
     reason: reason || null,
+    saleTotal: parseFloat(sale.totalAmount as string),
+    previousDebt: parseFloat(sale.previousDebt as string),
+    paidAmount: parseFloat(sale.paidAmount as string),
   });
 });
 
