@@ -1,3 +1,23 @@
 <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+  <!-- Background with rounded corners -->
+  <rect width="180" height="180" rx="40" fill="#1a1a2e"/>
+  
+  <!-- Outer ring accent -->
+  <rect x="8" y="8" width="164" height="164" rx="34" fill="none" stroke="#f59e0b" stroke-width="3" stroke-opacity="0.4"/>
+
+  <!-- Steering wheel outer ring -->
+  <circle cx="90" cy="82" r="44" fill="none" stroke="#f59e0b" stroke-width="7"/>
+  
+  <!-- Steering wheel spokes -->
+  <line x1="90" y1="38" x2="90" y2="62" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <line x1="90" y1="102" x2="90" y2="126" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <line x1="46" y1="82" x2="70" y2="82" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  <line x1="110" y1="82" x2="134" y2="82" stroke="#f59e0b" stroke-width="6" stroke-linecap="round"/>
+  
+  <!-- Center hub -->
+  <circle cx="90" cy="82" r="12" fill="#f59e0b"/>
+  <circle cx="90" cy="82" r="6" fill="#1a1a2e"/>
+
+  <!-- Arabic letter ي stylized at bottom -->
+  <text x="90" y="162" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#f59e0b" letter-spacing="1">ياسين</text>
 </svg>

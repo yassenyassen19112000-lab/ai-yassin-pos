@@ -1,20 +1,32 @@
 import { useState } from "react";
-import { useListSales, useGetSale, getGetSaleQueryKey } from "@workspace/api-client-react";
+import { useListSales, useGetSale } from "@workspace/api-client-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api";
 import { formatCurrency, formatDateTime, paymentTypeLabel } from "@/lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Eye, Printer, MessageCircle, FileText } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Loader2, Eye, Printer, MessageCircle, FileText, RotateCcw, Minus, Plus, Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+interface ReturnItem { productId: number; productName: string; quantity: number; maxQty: number; sellingPrice: number; }
 
 export default function Sales() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null);
+  const [returnSaleId, setReturnSaleId] = useState<number | null>(null);
+  const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnSuccess, setReturnSuccess] = useState<any>(null);
+  const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data: sales, isLoading } = useListSales({
     startDate: startDate || undefined,
@@ -23,9 +35,62 @@ export default function Sales() {
   });
 
   const { data: saleDetail } = useGetSale(
-    selectedSaleId!,
-    { query: { enabled: !!selectedSaleId } }
+    selectedSaleId ?? returnSaleId ?? 0,
+    { query: { enabled: !!(selectedSaleId || returnSaleId) } }
   );
+
+  const returnMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) =>
+      apiClient(`/api/sales/${id}/return`, { method: "POST", body: JSON.stringify(data) }),
+    onSuccess: (data: any) => {
+      setReturnSuccess(data);
+      qc.invalidateQueries({ queryKey: ["sales"] });
+      toast({ title: `تم تسجيل المرتجع: ${formatCurrency(data.returnAmount)}` });
+    },
+    onError: (err: any) => toast({ title: err?.message || "خطأ في تسجيل المرتجع", variant: "destructive" }),
+  });
+
+  const openReturn = (sale: any) => {
+    setReturnSaleId(sale.id);
+    setReturnReason("");
+    setReturnSuccess(null);
+  };
+
+  const initReturnItems = (sale: any) => {
+    setReturnItems(sale.items.map((i: any) => ({
+      productId: i.productId,
+      productName: i.productName,
+      quantity: 0,
+      maxQty: i.quantity,
+      sellingPrice: i.sellingPrice,
+    })));
+  };
+
+  const updateReturnQty = (idx: number, delta: number) => {
+    setReturnItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const newQty = Math.max(0, Math.min(item.maxQty, item.quantity + delta));
+      return { ...item, quantity: newQty };
+    }));
+  };
+
+  const setReturnQtyDirect = (idx: number, val: number) => {
+    setReturnItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      return { ...item, quantity: Math.max(0, Math.min(item.maxQty, val)) };
+    }));
+  };
+
+  const handleSubmitReturn = () => {
+    const selected = returnItems.filter(i => i.quantity > 0);
+    if (!selected.length) { toast({ title: "اختر منتجاً واحداً على الأقل", variant: "destructive" }); return; }
+    returnMutation.mutate({
+      id: returnSaleId!,
+      data: { items: selected.map(i => ({ productId: i.productId, productName: i.productName, quantity: i.quantity })), reason: returnReason || undefined },
+    });
+  };
+
+  const returnTotal = returnItems.reduce((s, i) => s + i.quantity * i.sellingPrice, 0);
 
   const handleWhatsApp = (sale: any) => {
     const text = `فاتورة من محل آل ياسين لاكسسوار الموتال\nرقم الفاتورة: ${sale.invoiceNumber}\nالتاريخ: ${new Date(sale.createdAt).toLocaleDateString("ar-EG")}\n---\n` +
@@ -77,9 +142,15 @@ export default function Sales() {
                   <TableCell><Badge variant="outline">{paymentTypeLabel(s.paymentType)}</Badge></TableCell>
                   <TableCell className="text-muted-foreground text-xs">{formatDateTime(s.createdAt)}</TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="sm" onClick={() => setSelectedSaleId(s.id)}>
-                      <Eye className="w-3.5 h-3.5" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedSaleId(s.id)}>
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-orange-500 hover:text-orange-600 hover:bg-orange-50"
+                        onClick={() => { openReturn(s); }}>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -91,10 +162,11 @@ export default function Sales() {
         </Card>
       )}
 
+      {/* Invoice detail dialog */}
       <Dialog open={!!selectedSaleId} onOpenChange={() => setSelectedSaleId(null)}>
         <DialogContent dir="rtl" className="max-w-md">
           <DialogHeader><DialogTitle>تفاصيل الفاتورة</DialogTitle></DialogHeader>
-          {saleDetail && (
+          {saleDetail && selectedSaleId && (
             <div className="space-y-3">
               <div id="print-invoice" className="border rounded-lg p-5 bg-white text-gray-900">
                 <div className="text-center mb-4 pb-3 border-b-2 border-gray-400">
@@ -132,8 +204,122 @@ export default function Sales() {
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}><Printer className="w-4 h-4 ml-2" />طباعة</Button>
                 <Button variant="outline" className="flex-1 text-green-600" onClick={() => handleWhatsApp(saleDetail)}><MessageCircle className="w-4 h-4 ml-2" />واتساب</Button>
+                <Button variant="outline" className="text-orange-500 border-orange-200" onClick={() => { setSelectedSaleId(null); openReturn(saleDetail); }}>
+                  <RotateCcw className="w-4 h-4 ml-1" />مرتجع
+                </Button>
               </div>
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Return dialog */}
+      <Dialog open={!!returnSaleId} onOpenChange={(open) => { if (!open) { setReturnSaleId(null); setReturnItems([]); setReturnSuccess(null); } }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-orange-500" />
+              تسجيل مرتجع
+            </DialogTitle>
+          </DialogHeader>
+
+          {returnSuccess ? (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <Check className="w-10 h-10 text-green-500 mx-auto mb-2" />
+                <p className="font-bold text-green-700 text-lg">تم تسجيل المرتجع بنجاح</p>
+                <p className="text-green-600 mt-1">تم استرداد: <span className="font-bold">{formatCurrency(returnSuccess.returnAmount)}</span></p>
+                <p className="text-xs text-green-500 mt-1">تم إضافة المنتجات للمخزون تلقائياً</p>
+              </div>
+              <div className="space-y-1 text-sm">
+                {returnSuccess.items.map((i: any, idx: number) => (
+                  <div key={idx} className="flex justify-between bg-muted rounded px-3 py-1.5">
+                    <span>{i.productName} × {i.quantity}</span>
+                    <span className="font-medium">{formatCurrency(i.total)}</span>
+                  </div>
+                ))}
+              </div>
+              {returnSuccess.reason && <p className="text-sm text-muted-foreground">السبب: {returnSuccess.reason}</p>}
+              <Button className="w-full" onClick={() => { setReturnSaleId(null); setReturnItems([]); setReturnSuccess(null); }}>إغلاق</Button>
+            </div>
+          ) : saleDetail && returnSaleId ? (
+            <div className="space-y-4">
+              {returnItems.length === 0 && (
+                <div>
+                  <p className="text-sm text-muted-foreground mb-3">اختر المنتجات المراد إرجاعها:</p>
+                  <div className="space-y-2">
+                    {saleDetail.items.map((item: any) => (
+                      <div key={item.productId} className="flex items-center justify-between bg-muted rounded-lg px-3 py-2 text-sm">
+                        <span className="font-medium">{item.productName}</span>
+                        <span className="text-muted-foreground">الكمية: {item.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <Button className="w-full mt-3" onClick={() => initReturnItems(saleDetail)}>
+                    تحديد المرتجعات
+                  </Button>
+                </div>
+              )}
+
+              {returnItems.length > 0 && (
+                <>
+                  <div className="space-y-2">
+                    {returnItems.map((item, idx) => (
+                      <div key={item.productId} className="border rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium">{item.productName}</span>
+                          <span className="text-xs text-muted-foreground">من أصل {item.maxQty}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => updateReturnQty(idx, -1)} className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <Input
+                            type="number"
+                            min="0"
+                            max={item.maxQty}
+                            value={item.quantity}
+                            onChange={e => setReturnQtyDirect(idx, parseInt(e.target.value) || 0)}
+                            className="w-16 h-7 text-center text-sm p-0"
+                          />
+                          <button onClick={() => updateReturnQty(idx, 1)} className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs text-muted-foreground mr-auto">{formatCurrency(item.quantity * item.sellingPrice)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">سبب المرتجع (اختياري)</Label>
+                    <Input value={returnReason} onChange={e => setReturnReason(e.target.value)} placeholder="عيب، خطأ في الطلب..." className="h-8 mt-1 text-sm" />
+                  </div>
+
+                  {returnTotal > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex justify-between items-center">
+                      <span className="text-sm text-orange-700 font-medium">إجمالي المرتجع:</span>
+                      <span className="text-lg font-bold text-orange-700">{formatCurrency(returnTotal)}</span>
+                    </div>
+                  )}
+
+                  <Separator />
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" onClick={() => setReturnItems([])}>رجوع</Button>
+                    <Button
+                      className="flex-1 bg-orange-500 hover:bg-orange-600 text-white"
+                      onClick={handleSubmitReturn}
+                      disabled={returnTotal === 0 || returnMutation.isPending}
+                    >
+                      {returnMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                      تأكيد المرتجع
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
           )}
         </DialogContent>
       </Dialog>

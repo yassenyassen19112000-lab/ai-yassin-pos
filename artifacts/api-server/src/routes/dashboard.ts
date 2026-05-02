@@ -1,92 +1,130 @@
 import { Router } from "express";
-import { db, salesTable, purchasesTable, productsTable, debtsTable, saleItemsTable } from "@workspace/db";
+import { db, salesTable, purchasesTable, productsTable, debtsTable, saleItemsTable, expensesTable } from "@workspace/db";
 import { eq, gte, and, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
 const router = Router();
 
-router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> => {
+router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> => {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
 
+  // Sales totals
   const [salesToday] = await db.select({
-    total: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    total: sql<string>`COALESCE(SUM(paid_amount), 0)`,
     count: sql<number>`COUNT(*)`,
   }).from(salesTable).where(gte(salesTable.createdAt, startOfToday));
 
-  const [salesWeek] = await db.select({
-    total: sql<string>`COALESCE(SUM(total_amount), 0)`,
-  }).from(salesTable).where(gte(salesTable.createdAt, startOfWeek));
-
   const [salesMonth] = await db.select({
-    total: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    totalAmount: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    paidAmount: sql<string>`COALESCE(SUM(paid_amount), 0)`,
     count: sql<number>`COUNT(*)`,
   }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth));
 
+  // Purchases this month (what we paid)
   const [purchasesMonth] = await db.select({
     total: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    paid: sql<string>`COALESCE(SUM(paid_amount), 0)`,
     count: sql<number>`COUNT(*)`,
   }).from(purchasesTable).where(gte(purchasesTable.createdAt, startOfMonth));
 
-  const allSalesMonth = await db.select({
-    totalAmount: salesTable.totalAmount,
-  }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth));
+  // Expenses this month
+  const [expensesMonth] = await db.select({
+    total: sql<string>`COALESCE(SUM(amount), 0)`,
+  }).from(expensesTable).where(gte(expensesTable.createdAt, startOfMonth));
 
-  const allSaleItems = await db.select({
-    productId: saleItemsTable.productId,
-    quantity: saleItemsTable.quantity,
-    sellingPrice: saleItemsTable.sellingPrice,
-    total: saleItemsTable.total,
-  }).from(saleItemsTable);
+  // All-time expenses
+  const [expensesAll] = await db.select({
+    total: sql<string>`COALESCE(SUM(amount), 0)`,
+  }).from(expensesTable);
 
-  const products = await db.select().from(productsTable);
-  const productMap = new Map(products.map(p => [p.id, p]));
+  // All-time sales collected
+  const [salesAll] = await db.select({
+    totalAmount: sql<string>`COALESCE(SUM(total_amount), 0)`,
+    paidAmount: sql<string>`COALESCE(SUM(paid_amount), 0)`,
+  }).from(salesTable);
 
-  let profitMonth = 0;
-  const saleIds = await db.select({ id: salesTable.id }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth));
-  const saleIdSet = new Set(saleIds.map(s => s.id));
+  // All-time purchases paid
+  const [purchasesAll] = await db.select({
+    paid: sql<string>`COALESCE(SUM(paid_amount), 0)`,
+  }).from(purchasesTable);
 
-  const monthSaleItems = await db.select().from(saleItemsTable);
-  for (const item of monthSaleItems) {
-    const product = productMap.get(item.productId);
-    if (product) {
-      const revenue = parseFloat(item.total as string);
-      const cost = parseFloat(product.costPrice as string) * item.quantity;
-      profitMonth += revenue - cost;
-    }
-  }
+  // Returns this month
+  const returnsThisMonth = await db.execute(
+    sql`SELECT COALESCE(SUM(return_amount), 0) as total FROM sales_returns WHERE created_at >= ${startOfMonth}`
+  );
+  const returnsMonthTotal = parseFloat((returnsThisMonth.rows[0] as any)?.total ?? "0");
 
-  const customerDebts = await db.select({
+  // All-time returns
+  const returnsAllTime = await db.execute(
+    sql`SELECT COALESCE(SUM(return_amount), 0) as total FROM sales_returns`
+  );
+  const returnsAllTotal = parseFloat((returnsAllTime.rows[0] as any)?.total ?? "0");
+
+  // Customer debts (what they owe us)
+  const [customerDebts] = await db.select({
     total: sql<string>`COALESCE(SUM(remaining_amount), 0)`,
-  }).from(debtsTable).where(and(
-    eq(debtsTable.type, "customer"),
-    sql`status != 'paid'`
-  ));
+  }).from(debtsTable).where(and(eq(debtsTable.type, "customer"), sql`status != 'paid'`));
 
-  const supplierDebts = await db.select({
+  // Supplier debts (what we owe them)
+  const [supplierDebts] = await db.select({
     total: sql<string>`COALESCE(SUM(remaining_amount), 0)`,
-  }).from(debtsTable).where(and(
-    eq(debtsTable.type, "supplier"),
-    sql`status != 'paid'`
-  ));
+  }).from(debtsTable).where(and(eq(debtsTable.type, "supplier"), sql`status != 'paid'`));
 
   const allProducts = await db.select().from(productsTable);
   const lowStock = allProducts.filter(p => p.quantity <= p.minStockLevel);
 
+  // Profit calculation: (sales revenue - cost of goods sold)
+  const allSaleItems = await db.select().from(saleItemsTable);
+  const productMap = new Map(allProducts.map(p => [p.id, p]));
+  
+  const saleIdsThisMonth = (await db.select({ id: salesTable.id }).from(salesTable).where(gte(salesTable.createdAt, startOfMonth))).map(s => s.id);
+  const saleIdSet = new Set(saleIdsThisMonth);
+  
+  let profitMonth = 0;
+  for (const item of allSaleItems) {
+    if (!saleIdSet.has(item.saleId)) continue;
+    const product = productMap.get(item.productId);
+    if (product) {
+      profitMonth += parseFloat(item.total as string) - (parseFloat(product.costPrice as string) * item.quantity);
+    }
+  }
+
+  // Financial position (all-time)
+  const totalCollected = parseFloat(salesAll.paidAmount ?? "0"); // cash received from customers
+  const totalPurchasesPaid = parseFloat(purchasesAll.paid ?? "0"); // cash paid to suppliers
+  const totalExpenses = parseFloat(expensesAll.total ?? "0"); // other expenses paid
+  const totalCustomerDebts = parseFloat(customerDebts[0]?.total ?? "0"); // still owed by customers
+  const totalSupplierDebts = parseFloat(supplierDebts[0]?.total ?? "0"); // still owed to suppliers
+
+  // Net cash position = money in - money out + what customers owe - what suppliers owe
+  const netCashPosition = totalCollected - totalPurchasesPaid - totalExpenses;
+  const netPosition = netCashPosition + totalCustomerDebts - totalSupplierDebts;
+
   res.json({
+    // Today
     totalSalesToday: parseFloat(salesToday.total ?? "0"),
-    totalSalesWeek: parseFloat(salesWeek.total ?? "0"),
-    totalSalesMonth: parseFloat(salesMonth.total ?? "0"),
+    // This month
+    totalSalesMonth: parseFloat(salesMonth.totalAmount ?? "0"),
+    totalSalesCollectedMonth: parseFloat(salesMonth.paidAmount ?? "0"),
     totalPurchasesMonth: parseFloat(purchasesMonth.total ?? "0"),
-    totalProfit: profitMonth,
+    totalPurchasesPaidMonth: parseFloat(purchasesMonth.paid ?? "0"),
+    totalExpensesMonth: parseFloat(expensesMonth.total ?? "0"),
+    totalReturnsMonth: returnsMonthTotal,
     totalProfitMonth: profitMonth,
-    totalCustomerDebts: parseFloat(customerDebts[0]?.total ?? "0"),
-    totalSupplierDebts: parseFloat(supplierDebts[0]?.total ?? "0"),
+    // All-time
+    totalCollected,
+    totalPurchasesPaid,
+    totalExpenses,
+    totalReturns: returnsAllTotal,
+    // Debts (current)
+    totalCustomerDebts,
+    totalSupplierDebts,
+    // Net position
+    netCashPosition,
+    netPosition,
+    // Other
     lowStockCount: lowStock.length,
     totalProducts: allProducts.length,
     totalSalesCount: parseInt(String(salesMonth.count ?? 0)),
@@ -150,49 +188,18 @@ router.get("/dashboard/sales-chart", requireAuth, async (req, res): Promise<void
   const now = new Date();
   const result = [];
 
-  if (period === "week") {
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-      const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-      
-      const [sales] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(salesTable).where(and(gte(salesTable.createdAt, start), sql`created_at < ${end}`));
-      const [purchases] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(purchasesTable).where(and(gte(purchasesTable.createdAt, start), sql`created_at < ${end}`));
-
-      const salesTotal = parseFloat(sales?.total ?? "0");
-      const purchasesTotal = parseFloat(purchases?.total ?? "0");
-      
-      const days = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      result.push({
-        label: days[d.getDay()],
-        sales: salesTotal,
-        purchases: purchasesTotal,
-        profit: salesTotal - purchasesTotal,
-      });
-    }
-  } else if (period === "month") {
+  if (period === "month") {
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-      
-      const [sales] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(salesTable).where(and(gte(salesTable.createdAt, d), sql`created_at < ${end}`));
-      const [purchases] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(purchasesTable).where(and(gte(purchasesTable.createdAt, d), sql`created_at < ${end}`));
-
+      const [sales] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` }).from(salesTable).where(and(gte(salesTable.createdAt, d), sql`created_at < ${end}`));
+      const [purchases] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` }).from(purchasesTable).where(and(gte(purchasesTable.createdAt, d), sql`created_at < ${end}`));
+      const [expenses] = await db.select({ total: sql<string>`COALESCE(SUM(amount), 0)` }).from(expensesTable).where(and(gte(expensesTable.createdAt, d), sql`created_at < ${end}`));
       const salesTotal = parseFloat(sales?.total ?? "0");
       const purchasesTotal = parseFloat(purchases?.total ?? "0");
+      const expensesTotal = parseFloat(expenses?.total ?? "0");
       const months = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-      
-      result.push({
-        label: months[d.getMonth()],
-        sales: salesTotal,
-        purchases: purchasesTotal,
-        profit: salesTotal - purchasesTotal,
-      });
+      result.push({ label: months[d.getMonth()], sales: salesTotal, purchases: purchasesTotal, expenses: expensesTotal, profit: salesTotal - purchasesTotal - expensesTotal });
     }
   } else {
     for (let i = 6; i >= 0; i--) {
@@ -200,21 +207,14 @@ router.get("/dashboard/sales-chart", requireAuth, async (req, res): Promise<void
       d.setDate(d.getDate() - i);
       const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
       const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-      
-      const [sales] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(salesTable).where(and(gte(salesTable.createdAt, start), sql`created_at < ${end}`));
-      const [purchases] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` })
-        .from(purchasesTable).where(and(gte(purchasesTable.createdAt, start), sql`created_at < ${end}`));
-
+      const [sales] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` }).from(salesTable).where(and(gte(salesTable.createdAt, start), sql`created_at < ${end}`));
+      const [purchases] = await db.select({ total: sql<string>`COALESCE(SUM(total_amount), 0)` }).from(purchasesTable).where(and(gte(purchasesTable.createdAt, start), sql`created_at < ${end}`));
+      const [expenses] = await db.select({ total: sql<string>`COALESCE(SUM(amount), 0)` }).from(expensesTable).where(and(gte(expensesTable.createdAt, start), sql`created_at < ${end}`));
       const salesTotal = parseFloat(sales?.total ?? "0");
       const purchasesTotal = parseFloat(purchases?.total ?? "0");
+      const expensesTotal = parseFloat(expenses?.total ?? "0");
       const days = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-      result.push({
-        label: days[d.getDay()],
-        sales: salesTotal,
-        purchases: purchasesTotal,
-        profit: salesTotal - purchasesTotal,
-      });
+      result.push({ label: days[d.getDay()], sales: salesTotal, purchases: purchasesTotal, expenses: expensesTotal, profit: salesTotal - purchasesTotal - expensesTotal });
     }
   }
 
