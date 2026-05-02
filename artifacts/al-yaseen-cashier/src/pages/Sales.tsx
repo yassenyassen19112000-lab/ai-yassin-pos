@@ -39,11 +39,18 @@ export default function Sales() {
     { query: { enabled: !!(selectedSaleId || returnSaleId) } }
   );
 
-  // Fetch returns for the currently viewed invoice
+  // Fetch returns for the currently viewed invoice (detail view)
   const { data: saleReturns } = useQuery({
     queryKey: ["sale-returns", selectedSaleId],
     queryFn: () => apiClient<any[]>(`/api/sales/${selectedSaleId}/returns`),
     enabled: !!selectedSaleId,
+  });
+
+  // Fetch returns for the return dialog (to know remaining returnable qty)
+  const { data: returnSaleReturns } = useQuery({
+    queryKey: ["sale-returns", returnSaleId],
+    queryFn: () => apiClient<any[]>(`/api/sales/${returnSaleId}/returns`),
+    enabled: !!returnSaleId,
   });
 
   const returnMutation = useMutation({
@@ -52,7 +59,9 @@ export default function Sales() {
     onSuccess: (data: any) => {
       setReturnSuccess(data);
       qc.invalidateQueries({ queryKey: ["sales"] });
+      // Refresh returns for this sale so quantities update immediately if dialog is re-opened
       qc.invalidateQueries({ queryKey: ["sale-returns", returnSaleId] });
+      qc.invalidateQueries({ queryKey: ["sale-returns", selectedSaleId] });
       toast({ title: `تم تسجيل المرتجع: ${formatCurrency(data.returnAmount)}` });
     },
     onError: (err: any) => toast({ title: err?.message || "خطأ في تسجيل المرتجع", variant: "destructive" }),
@@ -66,13 +75,26 @@ export default function Sales() {
   };
 
   const initReturnItems = (sale: any) => {
-    setReturnItems(sale.items.map((i: any) => ({
-      productId: i.productId,
-      productName: i.productName,
-      quantity: 0,
-      maxQty: i.quantity,
-      sellingPrice: i.sellingPrice,
-    })));
+    // Calculate already-returned qty per product from previous returns on this sale
+    const alreadyReturned: Record<number, number> = {};
+    for (const ret of (returnSaleReturns ?? [])) {
+      const items = Array.isArray(ret.items) ? ret.items : [];
+      for (const ri of items) {
+        alreadyReturned[ri.productId] = (alreadyReturned[ri.productId] ?? 0) + ri.quantity;
+      }
+    }
+    setReturnItems(
+      sale.items
+        .map((i: any) => ({
+          productId: i.productId,
+          productName: i.productName,
+          quantity: 0,
+          maxQty: Math.max(0, i.quantity - (alreadyReturned[i.productId] ?? 0)),
+          alreadyReturned: alreadyReturned[i.productId] ?? 0,
+          sellingPrice: i.sellingPrice,
+        }))
+        .filter((i: any) => i.maxQty > 0)
+    );
   };
 
   const updateReturnQty = (idx: number, delta: number) => {
@@ -248,17 +270,34 @@ export default function Sales() {
                     <span>المدفوع</span>
                     <span>{formatCurrency(saleDetail.paidAmount)}</span>
                   </div>
-                  {saleDetail.remainingDebt > 0 ? (
-                    <div className="flex justify-between font-bold text-base text-red-700 border-t border-gray-300 pt-1">
-                      <span>متبقي على العميل (دين)</span>
-                      <span>{formatCurrency(saleDetail.remainingDebt)}</span>
-                    </div>
-                  ) : (
-                    <div className="flex justify-between text-green-600 border-t border-gray-300 pt-1">
-                      <span>الحساب مسوَّى ✓</span>
-                      <span>{formatCurrency(0)}</span>
-                    </div>
-                  )}
+                  {/* Net balance — positive means customer owes us, negative means we owe customer */}
+                  {(() => {
+                    const grandTotal = saleDetail.totalAmount + saleDetail.previousDebt - saleDetail.discountAmount;
+                    // net = what is still owed after paying; positive = customer owes, negative = store owes refund
+                    const net = grandTotal - saleDetail.paidAmount;
+                    if (net > 0.005) {
+                      return (
+                        <div className="flex justify-between font-bold text-base text-red-700 border-t border-gray-300 pt-1">
+                          <span>رصيد الفاتورة (على العميل)</span>
+                          <span>+ {formatCurrency(net)}</span>
+                        </div>
+                      );
+                    } else if (net < -0.005) {
+                      return (
+                        <div className="flex justify-between font-bold text-base text-blue-700 border-t border-gray-300 pt-1">
+                          <span>💵 مسترد للعميل</span>
+                          <span>- {formatCurrency(Math.abs(net))}</span>
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="flex justify-between text-green-600 border-t border-gray-300 pt-1">
+                          <span>✓ الحساب مسوَّى</span>
+                          <span>{formatCurrency(0)}</span>
+                        </div>
+                      );
+                    }
+                  })()}
                 </div>
 
                 {/* Returns section - shown only if there are returns */}
@@ -439,22 +478,48 @@ export default function Sales() {
                 </div>
               </div>
 
-              {returnItems.length === 0 && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-3">اختر المنتجات المراد إرجاعها:</p>
-                  <div className="space-y-2">
-                    {saleDetail.items.map((item: any) => (
-                      <div key={item.productId} className="flex items-center justify-between bg-muted rounded-lg px-3 py-2 text-sm">
-                        <span className="font-medium">{item.productName}</span>
-                        <span className="text-muted-foreground">الكمية: {item.quantity}</span>
+              {returnItems.length === 0 && (() => {
+                // Pre-calculate already-returned qty so the list screen shows remaining
+                const alreadyRet: Record<number, number> = {};
+                for (const ret of (returnSaleReturns ?? [])) {
+                  for (const ri of (Array.isArray(ret.items) ? ret.items : [])) {
+                    alreadyRet[ri.productId] = (alreadyRet[ri.productId] ?? 0) + ri.quantity;
+                  }
+                }
+                const availableItems = saleDetail.items.map((i: any) => ({
+                  ...i,
+                  available: Math.max(0, i.quantity - (alreadyRet[i.productId] ?? 0)),
+                  returned: alreadyRet[i.productId] ?? 0,
+                }));
+                const hasAny = availableItems.some((i: any) => i.available > 0);
+                return (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-3">الكميات المتاحة للإرجاع:</p>
+                    <div className="space-y-1.5">
+                      {availableItems.map((item: any) => (
+                        <div key={item.productId} className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${item.available === 0 ? "bg-muted/40 opacity-50" : "bg-muted"}`}>
+                          <span className={`font-medium ${item.available === 0 ? "line-through text-muted-foreground" : ""}`}>{item.productName}</span>
+                          <div className="text-xs text-left">
+                            {item.returned > 0 && <span className="text-orange-500 block">تم إرجاع {item.returned}</span>}
+                            <span className={item.available === 0 ? "text-muted-foreground" : "text-green-600 font-medium"}>
+                              متاح: {item.available}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {hasAny ? (
+                      <Button className="w-full mt-3" onClick={() => initReturnItems(saleDetail)}>
+                        تحديد الكميات المرتجعة
+                      </Button>
+                    ) : (
+                      <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 text-center text-sm text-green-700">
+                        ✓ تم إرجاع جميع المنتجات من هذه الفاتورة
                       </div>
-                    ))}
+                    )}
                   </div>
-                  <Button className="w-full mt-3" onClick={() => initReturnItems(saleDetail)}>
-                    تحديد الكميات المرتجعة
-                  </Button>
-                </div>
-              )}
+                );
+              })()}
 
               {returnItems.length > 0 && (
                 <>
@@ -463,7 +528,7 @@ export default function Sales() {
                       <div key={item.productId} className="border rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm font-medium">{item.productName}</span>
-                          <span className="text-xs text-muted-foreground">الكمية المباعة: {item.maxQty}</span>
+                          <span className="text-xs text-muted-foreground">متاح للإرجاع: {item.maxQty}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <button onClick={() => updateReturnQty(idx, -1)} className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
@@ -493,15 +558,26 @@ export default function Sales() {
 
                   {returnTotal > 0 && (() => {
                     const grandTotal = saleDetail.totalAmount + saleDetail.previousDebt;
-                    const netAfter = grandTotal - returnTotal;
-                    const refundDue = returnTotal > saleDetail.paidAmount ? returnTotal - saleDetail.paidAmount : 0;
-                    const remainingAfter = netAfter > saleDetail.paidAmount ? netAfter - saleDetail.paidAmount : 0;
+                    // Include previously returned amounts in the calculation
+                    const prevReturnedTotal = (returnSaleReturns ?? []).reduce(
+                      (s: number, r: any) => s + parseFloat(r.return_amount ?? 0), 0
+                    );
+                    const totalReturnedAfterThis = prevReturnedTotal + returnTotal;
+                    // net = what customer owes (or store owes if negative)
+                    // balance = grandTotal - allReturns - paidAmount
+                    const balance = grandTotal - totalReturnedAfterThis - saleDetail.paidAmount;
                     return (
                       <div className="border border-orange-200 rounded-lg overflow-hidden text-sm">
                         <div className="bg-orange-50 px-3 py-2 flex justify-between font-bold text-orange-700">
-                          <span>قيمة المرتجع</span>
+                          <span>هذا المرتجع</span>
                           <span>- {formatCurrency(returnTotal)}</span>
                         </div>
+                        {prevReturnedTotal > 0 && (
+                          <div className="px-3 py-1.5 flex justify-between text-orange-500 bg-orange-50/60 border-t border-orange-100 text-xs">
+                            <span>مرتجعات سابقة</span>
+                            <span>- {formatCurrency(prevReturnedTotal)}</span>
+                          </div>
+                        )}
                         <div className="px-3 py-2 flex justify-between text-muted-foreground bg-white border-t border-orange-100">
                           <span>الإجمالي الكلي المطلوب</span>
                           <span>{formatCurrency(grandTotal)}</span>
@@ -510,19 +586,20 @@ export default function Sales() {
                           <span>المدفوع مسبقاً</span>
                           <span>{formatCurrency(saleDetail.paidAmount)}</span>
                         </div>
-                        {refundDue > 0 ? (
-                          <div className="px-3 py-2.5 flex justify-between font-bold text-blue-700 bg-blue-50 border-t border-blue-200">
-                            <span>💵 مبلغ مسترد للعميل</span>
-                            <span>{formatCurrency(refundDue)}</span>
-                          </div>
-                        ) : remainingAfter > 0 ? (
+                        {/* Balance: positive = customer owes, negative = store owes refund */}
+                        {balance > 0.005 ? (
                           <div className="px-3 py-2.5 flex justify-between font-bold text-red-700 bg-red-50 border-t border-red-200">
-                            <span>باقي على العميل بعد المرتجع</span>
-                            <span>{formatCurrency(remainingAfter)}</span>
+                            <span>رصيد على العميل بعد المرتجع</span>
+                            <span>+ {formatCurrency(balance)}</span>
+                          </div>
+                        ) : balance < -0.005 ? (
+                          <div className="px-3 py-2.5 flex justify-between font-bold text-blue-700 bg-blue-50 border-t border-blue-200">
+                            <span>💵 مسترد للعميل</span>
+                            <span>- {formatCurrency(Math.abs(balance))}</span>
                           </div>
                         ) : (
                           <div className="px-3 py-2.5 flex justify-between font-bold text-green-700 bg-green-50 border-t border-green-200">
-                            <span>✓ سيُسوَّى الحساب</span>
+                            <span>✓ الحساب سيُسوَّى تماماً</span>
                             <span>{formatCurrency(0)}</span>
                           </div>
                         )}
