@@ -300,21 +300,21 @@ export default function Sales() {
 
                 {/* Returns section - shown only if there are returns */}
                 {saleReturns && saleReturns.length > 0 && (() => {
+                  // grandTotal = what customer originally owed (items + prev debts)
                   const grandTotal = saleDetail.totalAmount + saleDetail.previousDebt;
-                  const netAfterReturn = grandTotal - totalReturned;
-                  const refundDue = totalReturned > saleDetail.paidAmount
-                    ? totalReturned - saleDetail.paidAmount
-                    : 0;
-                  const remainingAfterReturn = netAfterReturn > saleDetail.paidAmount
-                    ? netAfterReturn - saleDetail.paidAmount
-                    : 0;
+                  // netOwed = what they owe AFTER returns (could be < paidAmount)
+                  const netOwed = grandTotal - totalReturned;
+                  // balance: positive → store owes customer refund; negative → customer still owes store
+                  const balance = saleDetail.paidAmount - netOwed;
+                  const refundDue      = balance > 0.005  ? balance          : 0;
+                  const stillOwed      = balance < -0.005 ? Math.abs(balance) : 0;
                   return (
                   <div className="mt-4 pt-3 border-t-2 border-orange-300">
                     <p className="text-xs font-bold text-orange-700 mb-2 flex items-center gap-1">
                       <RotateCcw className="w-3 h-3" />
                       مرتجعات هذه الفاتورة
                     </p>
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {saleReturns.map((ret: any, idx: number) => (
                         <div key={idx} className="bg-orange-50 rounded p-2 text-xs">
                           <div className="flex justify-between font-semibold text-orange-800 mb-1">
@@ -331,36 +331,43 @@ export default function Sales() {
                           <p className="text-orange-400 mt-0.5">{new Date(ret.created_at).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
                         </div>
                       ))}
-                      <div className="flex justify-between font-bold text-orange-800 text-sm border-t border-orange-200 pt-1">
-                        <span>إجمالي المرتجعات</span>
-                        <span>- {formatCurrency(totalReturned)}</span>
-                      </div>
-                      {/* Net after return (grand total - returns) */}
-                      <div className="flex justify-between text-gray-700 text-sm">
-                        <span>الإجمالي الكلي - المرتجعات</span>
-                        <span className="font-semibold">{formatCurrency(Math.max(0, netAfterReturn))}</span>
-                      </div>
-                      <div className="flex justify-between text-gray-600 text-xs">
-                        <span>المدفوع فعلياً</span>
-                        <span>{formatCurrency(saleDetail.paidAmount)}</span>
-                      </div>
-                      {/* Final status */}
-                      {refundDue > 0 ? (
-                        <div className="flex justify-between font-bold text-blue-700 text-sm bg-blue-50 rounded px-2 py-1.5 border border-blue-200">
-                          <span>💵 مبلغ مسترد للعميل</span>
-                          <span>{formatCurrency(refundDue)}</span>
+
+                      {/* ── حساب المرتجع ─────────────────────────────── */}
+                      <div className="border border-orange-200 rounded-lg overflow-hidden text-xs mt-2">
+                        <div className="flex justify-between px-3 py-1.5 bg-gray-50 text-gray-700">
+                          <span>الإجمالي الكلي (قبل المرتجع)</span>
+                          <span className="font-semibold">{formatCurrency(grandTotal)}</span>
                         </div>
-                      ) : remainingAfterReturn > 0 ? (
-                        <div className="flex justify-between font-bold text-red-700 text-sm bg-red-50 rounded px-2 py-1.5 border border-red-200">
-                          <span>باقي على العميل بعد المرتجع</span>
-                          <span>{formatCurrency(remainingAfterReturn)}</span>
+                        <div className="flex justify-between px-3 py-1.5 bg-orange-50 text-orange-700 border-t border-orange-100">
+                          <span>إجمالي المرتجعات</span>
+                          <span className="font-semibold">- {formatCurrency(totalReturned)}</span>
                         </div>
-                      ) : (
-                        <div className="flex justify-between font-bold text-green-700 text-sm bg-green-50 rounded px-2 py-1.5 border border-green-200">
-                          <span>✓ الحساب مسوَّى بعد المرتجع</span>
-                          <span>{formatCurrency(0)}</span>
+                        <div className="flex justify-between px-3 py-1.5 bg-white border-t border-orange-100 text-gray-700">
+                          <span>صافي المطلوب بعد المرتجع</span>
+                          <span className="font-semibold">{formatCurrency(Math.max(0, netOwed))}</span>
                         </div>
-                      )}
+                        <div className="flex justify-between px-3 py-1.5 bg-green-50 text-green-700 border-t border-orange-100">
+                          <span>المدفوع فعلياً</span>
+                          <span className="font-semibold">{formatCurrency(saleDetail.paidAmount)}</span>
+                        </div>
+                        {/* النتيجة النهائية */}
+                        {refundDue > 0 ? (
+                          <div className="flex justify-between font-bold text-blue-700 bg-blue-50 px-3 py-2 border-t border-blue-200">
+                            <span>💵 مسترد للعميل (زيادة دفع)</span>
+                            <span>{formatCurrency(refundDue)}</span>
+                          </div>
+                        ) : stillOwed > 0 ? (
+                          <div className="flex justify-between font-bold text-red-700 bg-red-50 px-3 py-2 border-t border-red-200">
+                            <span>باقي على العميل</span>
+                            <span>+ {formatCurrency(stillOwed)}</span>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between font-bold text-green-700 bg-green-50 px-3 py-2 border-t border-green-200">
+                            <span>✓ الحساب مسوَّى تماماً</span>
+                            <span>{formatCurrency(0)}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   );
