@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, purchasesTable, purchaseItemsTable, productsTable, suppliersTable, debtsTable } from "@workspace/db";
-import { eq, and, gte, lte, ne } from "drizzle-orm";
+import { eq, and, gte, lte, ne, like } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
 const router = Router();
@@ -69,7 +69,21 @@ router.get("/suppliers/:supplierId/pending-debt", requireAuth, async (req, res):
 });
 
 router.post("/purchases", requireAuth, async (req, res): Promise<void> => {
-  const { supplierId, invoiceNumber, paymentType, paidAmount, notes, items, includeExistingDebt } = req.body;
+  let { supplierId, supplierName: supplierNameInput, invoiceNumber, paymentType, paidAmount, notes, items, includeExistingDebt } = req.body;
+
+  // Support free-text supplier name: find existing or auto-create
+  if (!supplierId && supplierNameInput?.trim()) {
+    const existing = await db.select().from(suppliersTable)
+      .where(like(suppliersTable.name, supplierNameInput.trim()));
+    if (existing.length > 0) {
+      supplierId = existing[0].id;
+    } else {
+      const [created] = await db.insert(suppliersTable)
+        .values({ name: supplierNameInput.trim() }).returning();
+      supplierId = created.id;
+    }
+  }
+
   if (!supplierId || !paymentType || !items?.length) {
     res.status(400).json({ error: "المورد، نوع الدفع، والمنتجات مطلوبة" });
     return;
@@ -179,6 +193,60 @@ router.get("/purchases/:id", requireAuth, async (req, res): Promise<void> => {
   const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, id));
   if (!purchase) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
   res.json(await formatPurchase(purchase));
+});
+
+// ── Add items to existing purchase ───────────────────────────────────────────
+router.post("/purchases/:id/add-items", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
+  const { items } = req.body;
+  if (!items?.length) { res.status(400).json({ error: "يجب إضافة منتجات" }); return; }
+
+  const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, id));
+  if (!purchase) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
+
+  let additionalTotal = 0;
+  for (const item of items) {
+    const total = item.quantity * item.costPrice;
+    additionalTotal += total;
+    await db.insert(purchaseItemsTable).values({
+      purchaseId: id, productId: item.productId,
+      quantity: item.quantity, costPrice: item.costPrice.toString(), total: total.toString(),
+    });
+    const [prod] = await db.select().from(productsTable).where(eq(productsTable.id, item.productId));
+    if (prod) {
+      await db.update(productsTable)
+        .set({ quantity: prod.quantity + item.quantity })
+        .where(eq(productsTable.id, item.productId));
+    }
+  }
+
+  const newTotal     = parseFloat(purchase.totalAmount     as string) + additionalTotal;
+  const newRemaining = parseFloat(purchase.remainingAmount as string) + additionalTotal;
+  await db.update(purchasesTable)
+    .set({ totalAmount: newTotal.toString(), remainingAmount: newRemaining.toString() })
+    .where(eq(purchasesTable.id, id));
+
+  const [existingDebt] = await db.select().from(debtsTable)
+    .where(and(eq(debtsTable.purchaseId, id), ne(debtsTable.status, "paid")));
+  if (existingDebt) {
+    await db.update(debtsTable)
+      .set({
+        totalAmount:     (parseFloat(existingDebt.totalAmount     as string) + additionalTotal).toString(),
+        remainingAmount: (parseFloat(existingDebt.remainingAmount as string) + additionalTotal).toString(),
+        status: "pending",
+      })
+      .where(eq(debtsTable.id, existingDebt.id));
+  } else if (newRemaining > 0) {
+    const [supplier] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, purchase.supplierId));
+    await db.insert(debtsTable).values({
+      type: "supplier", supplierId: purchase.supplierId, supplierName: supplier?.name ?? "",
+      totalAmount: additionalTotal.toString(), paidAmount: "0",
+      remainingAmount: additionalTotal.toString(), status: "pending", purchaseId: id,
+    });
+  }
+
+  const [updated] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, id));
+  res.json(await formatPurchase(updated));
 });
 
 export default router;

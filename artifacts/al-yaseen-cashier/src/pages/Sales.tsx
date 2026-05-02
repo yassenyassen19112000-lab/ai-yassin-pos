@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useListSales, useGetSale } from "@workspace/api-client-react";
+import { useListSales, useGetSale, useListProducts } from "@workspace/api-client-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api";
 import { formatCurrency, formatDateTime, paymentTypeLabel } from "@/lib/utils";
@@ -9,12 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Eye, Printer, MessageCircle, FileText, RotateCcw, Minus, Plus, Check } from "lucide-react";
+import { Loader2, Eye, Printer, MessageCircle, FileText, RotateCcw, Minus, Plus, Check, PackagePlus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface ReturnItem { productId: number; productName: string; quantity: number; maxQty: number; sellingPrice: number; }
+interface AddItem { productId: number; productName: string; quantity: number; sellingPrice: number; }
 
 export default function Sales() {
   const [startDate, setStartDate] = useState("");
@@ -25,6 +27,12 @@ export default function Sales() {
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
   const [returnReason, setReturnReason] = useState("");
   const [returnSuccess, setReturnSuccess] = useState<any>(null);
+  // add-items state
+  const [addItemsSaleId, setAddItemsSaleId]   = useState<number | null>(null);
+  const [addItemsList, setAddItemsList]         = useState<AddItem[]>([]);
+  const [addNewProduct, setAddNewProduct]       = useState("");
+  const [addNewQty, setAddNewQty]               = useState("1");
+  const [addNewPrice, setAddNewPrice]           = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -53,18 +61,32 @@ export default function Sales() {
     enabled: !!returnSaleId,
   });
 
+  const { data: products } = useListProducts({});
+
   const returnMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) =>
       apiClient(`/api/sales/${id}/return`, { method: "POST", body: JSON.stringify(data) }),
     onSuccess: (data: any) => {
       setReturnSuccess(data);
       qc.invalidateQueries({ queryKey: ["sales"] });
-      // Refresh returns for this sale so quantities update immediately if dialog is re-opened
       qc.invalidateQueries({ queryKey: ["sale-returns", returnSaleId] });
       qc.invalidateQueries({ queryKey: ["sale-returns", selectedSaleId] });
       toast({ title: `تم تسجيل المرتجع: ${formatCurrency(data.returnAmount)}` });
     },
     onError: (err: any) => toast({ title: err?.message || "خطأ في تسجيل المرتجع", variant: "destructive" }),
+  });
+
+  const addItemsMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) =>
+      apiClient(`/api/sales/${id}/add-items`, { method: "POST", body: JSON.stringify(data) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sales"] });
+      qc.invalidateQueries({ queryKey: ["sale", selectedSaleId] });
+      setAddItemsSaleId(null);
+      setAddItemsList([]);
+      toast({ title: "تم إضافة المنتجات للفاتورة" });
+    },
+    onError: () => toast({ title: "خطأ في إضافة المنتجات", variant: "destructive" }),
   });
 
   const openReturn = (sale: any) => {
@@ -376,12 +398,16 @@ export default function Sales() {
                 <p className="text-center text-sm mt-4 text-gray-600 border-t border-gray-300 pt-3">شكراً لتعاملكم معنا</p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}>
                   <Printer className="w-4 h-4 ml-2" />طباعة
                 </Button>
                 <Button variant="outline" className="flex-1 text-green-600" onClick={() => handleWhatsApp(saleDetail, saleReturns ?? [])}>
                   <MessageCircle className="w-4 h-4 ml-2" />واتساب
+                </Button>
+                <Button variant="outline" className="text-blue-500 border-blue-200"
+                  onClick={() => { setSelectedSaleId(null); setAddItemsSaleId(saleDetail.id); }}>
+                  <PackagePlus className="w-4 h-4 ml-1" />إضافة
                 </Button>
                 <Button variant="outline" className="text-orange-500 border-orange-200" onClick={() => { setSelectedSaleId(null); openReturn(saleDetail); }}>
                   <RotateCcw className="w-4 h-4 ml-1" />مرتجع
@@ -389,6 +415,74 @@ export default function Sales() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add items dialog */}
+      <Dialog open={!!addItemsSaleId}
+        onOpenChange={(open) => { if (!open) { setAddItemsSaleId(null); setAddItemsList([]); } }}>
+        <DialogContent dir="rtl" className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PackagePlus className="w-5 h-5 text-blue-500" />
+              إضافة منتجات لفاتورة موجودة
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Select value={addNewProduct} onValueChange={(v) => {
+                setAddNewProduct(v);
+                const p = products?.find(pr => pr.id === parseInt(v));
+                if (p) setAddNewPrice(p.sellingPrice.toString());
+              }}>
+                <SelectTrigger className="flex-1"><SelectValue placeholder="اختر منتج" /></SelectTrigger>
+                <SelectContent>{(products ?? []).map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input type="number" placeholder="ك" value={addNewQty} onChange={e => setAddNewQty(e.target.value)} className="w-16" />
+              <Input type="number" step="0.01" placeholder="سعر" value={addNewPrice} onChange={e => setAddNewPrice(e.target.value)} className="w-24" />
+              <Button type="button" onClick={() => {
+                const p = products?.find(pr => pr.id === parseInt(addNewProduct));
+                if (!p || !addNewQty || !addNewPrice) return;
+                setAddItemsList(prev => [...prev, { productId: p.id, productName: p.name, quantity: parseInt(addNewQty), sellingPrice: parseFloat(addNewPrice) }]);
+                setAddNewProduct(""); setAddNewQty("1"); setAddNewPrice("");
+              }}><Plus className="w-4 h-4" /></Button>
+            </div>
+
+            {addItemsList.length > 0 && (
+              <div className="space-y-1">
+                {addItemsList.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5 text-sm">
+                    <span>{item.productName}</span>
+                    <span>{item.quantity} × {formatCurrency(item.sellingPrice)} = {formatCurrency(item.quantity * item.sellingPrice)}</span>
+                    <button onClick={() => setAddItemsList(prev => prev.filter((_, j) => j !== i))} className="text-destructive mr-2">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex justify-between font-bold text-sm px-1 pt-1 border-t">
+                  <span>الإضافة الكلية</span>
+                  <span className="text-blue-600">{formatCurrency(addItemsList.reduce((s, i) => s + i.quantity * i.sellingPrice, 0))}</span>
+                </div>
+              </div>
+            )}
+
+            <Separator />
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { setAddItemsSaleId(null); setAddItemsList([]); }}>إلغاء</Button>
+              <Button className="flex-1 bg-blue-500 hover:bg-blue-600"
+                disabled={!addItemsList.length || addItemsMutation.isPending}
+                onClick={() => {
+                  if (!addItemsSaleId) return;
+                  addItemsMutation.mutate({
+                    id: addItemsSaleId,
+                    data: { items: addItemsList.map(i => ({ productId: i.productId, quantity: i.quantity, sellingPrice: i.sellingPrice })) },
+                  });
+                }}>
+                {addItemsMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                إضافة للفاتورة ({formatCurrency(addItemsList.reduce((s, i) => s + i.quantity * i.sellingPrice, 0))})
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

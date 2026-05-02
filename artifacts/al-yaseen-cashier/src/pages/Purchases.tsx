@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useListPurchases,
   useCreatePurchase,
@@ -12,33 +12,37 @@ import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Loader2, Trash2, Receipt, Search, Minus, RotateCcw } from "lucide-react";
+import { Plus, Loader2, Trash2, Receipt, Search, Minus, RotateCcw, PackagePlus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface PurchaseItem { productId: number; productName: string; quantity: number; costPrice: number; }
-interface ReturnItem { productId: number; productName: string; qty: number; maxQty: number; costPrice: number; }
+interface ReturnItem   { productId: number; productName: string; qty: number; maxQty: number; costPrice: number; }
+interface AddItem      { productId: number; productName: string; quantity: number; costPrice: number; }
 
 export default function Purchases() {
   // ── new purchase form ─────────────────────────────────────────────────────
-  const [showForm, setShowForm]           = useState(false);
-  const [supplierId, setSupplierId]       = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [paymentType, setPaymentType]     = useState("cash");
-  const [paidAmount, setPaidAmount]       = useState("0");
-  const [notes, setNotes]                 = useState("");
-  const [items, setItems]                 = useState<PurchaseItem[]>([]);
+  const [showForm, setShowForm]               = useState(false);
+  const [supplierId, setSupplierId]           = useState("");
+  const [supplierInput, setSupplierInput]     = useState("");
+  const [showSupplierDrop, setShowSupplierDrop] = useState(false);
+  const [invoiceNumber, setInvoiceNumber]     = useState("");
+  const [paymentType, setPaymentType]         = useState("cash");
+  const [paidAmount, setPaidAmount]           = useState("0");
+  const [notes, setNotes]                     = useState("");
+  const [items, setItems]                     = useState<PurchaseItem[]>([]);
   const [selectedProduct, setSelectedProduct] = useState("");
-  const [itemQty, setItemQty]             = useState("1");
-  const [itemPrice, setItemPrice]         = useState("");
+  const [itemQty, setItemQty]                 = useState("1");
+  const [itemPrice, setItemPrice]             = useState("");
   const [includeExistingDebt, setIncludeExistingDebt] = useState(false);
-  const [search, setSearch]               = useState("");
+  const [search, setSearch]                   = useState("");
+  const supplierInputRef = useRef<HTMLDivElement>(null);
 
   // ── invoice detail dialog ─────────────────────────────────────────────────
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<number | null>(null);
@@ -48,6 +52,13 @@ export default function Purchases() {
   const [returnItems, setReturnItems]           = useState<ReturnItem[]>([]);
   const [returnReason, setReturnReason]         = useState("");
   const [returnSuccess, setReturnSuccess]       = useState<any>(null);
+
+  // ── add-items dialog ──────────────────────────────────────────────────────
+  const [addItemsPurchaseId, setAddItemsPurchaseId] = useState<number | null>(null);
+  const [addItemsList, setAddItemsList]             = useState<AddItem[]>([]);
+  const [addNewProduct, setAddNewProduct]           = useState("");
+  const [addNewQty, setAddNewQty]                   = useState("1");
+  const [addNewPrice, setAddNewPrice]               = useState("");
 
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -60,31 +71,25 @@ export default function Purchases() {
   const { data: supplierPendingDebt } = useQuery<{ pendingDebt: number; debtIds: number[] }>({
     queryKey: ["supplier-pending-debt", supplierId],
     queryFn:  () => apiClient(`/api/suppliers/${supplierId}/pending-debt`),
-    enabled:  !!supplierId,
+    enabled:  !!supplierId && supplierId !== "0",
   });
 
-  // purchase detail for the selected invoice
   const { data: purchaseDetail } = useQuery<any>({
     queryKey: ["purchase-detail", selectedPurchaseId],
     queryFn:  () => apiClient(`/api/purchases/${selectedPurchaseId}`),
     enabled:  !!selectedPurchaseId,
   });
-
-  // returns for selected invoice
   const { data: purchaseReturns } = useQuery<any[]>({
     queryKey: ["purchase-returns", selectedPurchaseId],
     queryFn:  () => apiClient(`/api/purchases/${selectedPurchaseId}/returns`),
     enabled:  !!selectedPurchaseId,
   });
 
-  // returns already registered for the invoice being returned (used to limit qtys)
   const { data: returnPurchaseReturns } = useQuery<any[]>({
     queryKey: ["purchase-returns", returnPurchaseId],
     queryFn:  () => apiClient(`/api/purchases/${returnPurchaseId}/returns`),
     enabled:  !!returnPurchaseId,
   });
-
-  // purchase detail for return dialog
   const { data: returnPurchaseDetail } = useQuery<any>({
     queryKey: ["purchase-detail", returnPurchaseId],
     queryFn:  () => apiClient(`/api/purchases/${returnPurchaseId}`),
@@ -110,12 +115,36 @@ export default function Purchases() {
       setReturnSuccess(data);
       qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
       qc.invalidateQueries({ queryKey: ["purchase-returns", returnPurchaseId] });
-      qc.invalidateQueries({ queryKey: ["purchase-returns", selectedPurchaseId] });
       qc.invalidateQueries({ queryKey: ["purchase-detail", returnPurchaseId] });
       toast({ title: `تم تسجيل المرتجع: ${formatCurrency(data.returnAmount)}` });
     },
-    onError: (err: any) => toast({ title: err?.message || "خطأ في تسجيل المرتجع", variant: "destructive" }),
+    onError: (err: any) => toast({ title: err?.message || "خطأ في المرتجع", variant: "destructive" }),
   });
+
+  const addItemsMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) =>
+      apiClient(`/api/purchases/${id}/add-items`, { method: "POST", body: JSON.stringify(data) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
+      qc.invalidateQueries({ queryKey: ["purchase-detail", addItemsPurchaseId] });
+      qc.invalidateQueries({ queryKey: ["purchase-detail", selectedPurchaseId] });
+      setAddItemsPurchaseId(null);
+      setAddItemsList([]);
+      toast({ title: "تم إضافة المنتجات للفاتورة" });
+    },
+    onError: () => toast({ title: "خطأ في إضافة المنتجات", variant: "destructive" }),
+  });
+
+  // ── close dropdown on outside click ──────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (supplierInputRef.current && !supplierInputRef.current.contains(e.target as Node)) {
+        setShowSupplierDrop(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const addItem = () => {
@@ -130,8 +159,8 @@ export default function Purchases() {
 
   const resetForm = () => {
     setShowForm(false);
-    setSupplierId(""); setInvoiceNumber(""); setPaymentType("cash");
-    setPaidAmount("0"); setNotes(""); setItems([]);
+    setSupplierId(""); setSupplierInput(""); setInvoiceNumber("");
+    setPaymentType("cash"); setPaidAmount("0"); setNotes(""); setItems([]);
     setIncludeExistingDebt(false);
   };
 
@@ -143,27 +172,27 @@ export default function Purchases() {
   };
 
   const initReturnItems = (purchase: any) => {
-    // pre-subtract already-returned quantities
     const alreadyRet: Record<number, number> = {};
     for (const ret of (returnPurchaseReturns ?? [])) {
       for (const ri of (Array.isArray(ret.items) ? ret.items : [])) {
         alreadyRet[ri.productId] = (alreadyRet[ri.productId] ?? 0) + ri.quantity;
       }
     }
-    const available = purchase.items
-      .map((i: any) => ({ ...i, available: Math.max(0, i.quantity - (alreadyRet[i.productId] ?? 0)) }))
-      .filter((i: any) => i.available > 0);
-    setReturnItems(available.map((i: any) => ({
-      productId: i.productId, productName: i.productName,
-      qty: 0, maxQty: i.available, costPrice: i.costPrice,
-    })));
+    setReturnItems(
+      purchase.items
+        .map((i: any) => ({
+          productId: i.productId, productName: i.productName,
+          qty: 0, maxQty: Math.max(0, i.quantity - (alreadyRet[i.productId] ?? 0)),
+          costPrice: i.costPrice,
+        }))
+        .filter((i: any) => i.maxQty > 0)
+    );
   };
 
   const updateReturnQty = (idx: number, delta: number) => {
-    setReturnItems(prev => prev.map((item, i) => {
-      if (i !== idx) return item;
-      return { ...item, qty: Math.min(item.maxQty, Math.max(0, item.qty + delta)) };
-    }));
+    setReturnItems(prev => prev.map((item, i) =>
+      i !== idx ? item : { ...item, qty: Math.min(item.maxQty, Math.max(0, item.qty + delta)) }
+    ));
   };
 
   const submitReturn = () => {
@@ -178,17 +207,29 @@ export default function Purchases() {
     });
   };
 
+  const addNewItemToList = () => {
+    const p = products?.find(pr => pr.id === parseInt(addNewProduct));
+    if (!p || !addNewQty || !addNewPrice) return;
+    setAddItemsList(prev => [...prev, {
+      productId: p.id, productName: p.name,
+      quantity: parseInt(addNewQty), costPrice: parseFloat(addNewPrice),
+    }]);
+    setAddNewProduct(""); setAddNewQty("1"); setAddNewPrice("");
+  };
+
   // ── computed ──────────────────────────────────────────────────────────────
   const filteredPurchases = (purchases ?? []).filter(p =>
     !search || p.supplierName.toLowerCase().includes(search.toLowerCase()) || (p.invoiceNumber ?? "").includes(search)
   );
-
-  const itemsTotal  = items.reduce((s, i) => s + i.quantity * i.costPrice, 0);
+  const itemsTotal   = items.reduce((s, i) => s + i.quantity * i.costPrice, 0);
   const previousDebt = (includeExistingDebt && supplierPendingDebt) ? supplierPendingDebt.pendingDebt : 0;
-  const grandTotal  = itemsTotal + previousDebt;
-
-  const returnTotal = returnItems.reduce((s, i) => s + i.qty * i.costPrice, 0);
+  const grandTotal   = itemsTotal + previousDebt;
+  const returnTotal  = returnItems.reduce((s, i) => s + i.qty * i.costPrice, 0);
   const totalReturned = (purchaseReturns ?? []).reduce((s: number, r: any) => s + parseFloat(r.return_amount ?? 0), 0);
+  const filteredSuppliers = (suppliers ?? []).filter(s =>
+    !supplierInput || s.name.toLowerCase().includes(supplierInput.toLowerCase())
+  );
+  const addTotal = addItemsList.reduce((s, i) => s + i.quantity * i.costPrice, 0);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -262,7 +303,6 @@ export default function Purchases() {
           {purchaseDetail && (
             <div className="space-y-3">
               <div className="border rounded-lg p-4 bg-white text-gray-900 text-sm space-y-3">
-                {/* Header */}
                 <div className="text-center pb-3 border-b">
                   <p className="font-bold text-base">فاتورة شراء — {purchaseDetail.supplierName}</p>
                   <p className="text-xs text-gray-500">{formatDateTime(purchaseDetail.createdAt)}</p>
@@ -270,8 +310,6 @@ export default function Purchases() {
                     <p className="text-xs font-mono mt-0.5">رقم: {purchaseDetail.invoiceNumber}</p>
                   )}
                 </div>
-
-                {/* Items */}
                 <div className="space-y-1">
                   <div className="grid grid-cols-3 text-xs font-bold text-gray-600 border-b pb-1">
                     <span>المنتج</span><span className="text-center">الكمية</span><span className="text-left">الإجمالي</span>
@@ -284,8 +322,6 @@ export default function Purchases() {
                     </div>
                   ))}
                 </div>
-
-                {/* Totals */}
                 <div className="border-t-2 border-gray-300 pt-2 space-y-1">
                   <div className="flex justify-between font-semibold">
                     <span>إجمالي البضاعة</span>
@@ -295,19 +331,16 @@ export default function Purchases() {
                     <span>المدفوع للمورد</span>
                     <span>{formatCurrency(purchaseDetail.paidAmount)}</span>
                   </div>
-                  {/* Net balance from DB (updated by returns) */}
                   {(() => {
                     const net = parseFloat(purchaseDetail.remainingAmount ?? 0);
                     if (net > 0.005) return (
                       <div className="flex justify-between font-bold text-red-700 border-t border-gray-200 pt-1">
-                        <span>متبقي علينا للمورد</span>
-                        <span>+ {formatCurrency(net)}</span>
+                        <span>متبقي علينا للمورد</span><span>+ {formatCurrency(net)}</span>
                       </div>
                     );
                     if (net < -0.005) return (
                       <div className="flex justify-between font-bold text-blue-700 border-t border-gray-200 pt-1">
-                        <span>💵 مسترد من المورد</span>
-                        <span>- {formatCurrency(Math.abs(net))}</span>
+                        <span>💵 مسترد من المورد</span><span>- {formatCurrency(Math.abs(net))}</span>
                       </div>
                     );
                     return (
@@ -318,14 +351,11 @@ export default function Purchases() {
                   })()}
                 </div>
 
-                {/* Returns section */}
                 {purchaseReturns && purchaseReturns.length > 0 && (() => {
-                  const grandTotal = purchaseDetail.totalAmount;
-                  const netOwed    = grandTotal - totalReturned;
-                  // balance: positive = we still owe supplier; negative = supplier owes us
-                  const balance    = netOwed - purchaseDetail.paidAmount;
-                  const refundDue  = balance < -0.005 ? Math.abs(balance) : 0;
-                  const stillOwed  = balance >  0.005 ? balance           : 0;
+                  const netOwed = purchaseDetail.totalAmount - totalReturned;
+                  const balance = netOwed - purchaseDetail.paidAmount;
+                  const refundDue = balance < -0.005 ? Math.abs(balance) : 0;
+                  const stillOwed = balance > 0.005 ? balance : 0;
                   return (
                     <div className="mt-2 pt-3 border-t-2 border-orange-300">
                       <p className="text-xs font-bold text-orange-700 mb-2 flex items-center gap-1">
@@ -340,48 +370,33 @@ export default function Purchases() {
                             </div>
                             {Array.isArray(ret.items) && ret.items.map((ri: any, i: number) => (
                               <div key={i} className="flex justify-between text-orange-600 pr-2">
-                                <span>{ri.productName} × {ri.quantity}</span>
-                                <span>{formatCurrency(ri.total)}</span>
+                                <span>{ri.productName} × {ri.quantity}</span><span>{formatCurrency(ri.total)}</span>
                               </div>
                             ))}
                             {ret.reason && <p className="text-orange-500 mt-1">السبب: {ret.reason}</p>}
-                            <p className="text-orange-400 mt-0.5">
-                              {new Date(ret.created_at).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" })}
-                            </p>
                           </div>
                         ))}
-                        {/* Balance breakdown */}
                         <div className="border border-orange-200 rounded-lg overflow-hidden text-xs mt-1">
-                          <div className="flex justify-between px-3 py-1.5 bg-gray-50 text-gray-700">
-                            <span>الإجمالي الكلي (قبل المرتجع)</span>
-                            <span className="font-semibold">{formatCurrency(grandTotal)}</span>
+                          <div className="flex justify-between px-3 py-1.5 bg-gray-50">
+                            <span>الإجمالي قبل المرتجع</span><span className="font-semibold">{formatCurrency(purchaseDetail.totalAmount)}</span>
                           </div>
                           <div className="flex justify-between px-3 py-1.5 bg-orange-50 text-orange-700 border-t border-orange-100">
-                            <span>إجمالي المرتجعات</span>
-                            <span className="font-semibold">- {formatCurrency(totalReturned)}</span>
-                          </div>
-                          <div className="flex justify-between px-3 py-1.5 bg-white border-t border-orange-100 text-gray-700">
-                            <span>صافي المطلوب بعد المرتجع</span>
-                            <span className="font-semibold">{formatCurrency(Math.max(0, netOwed))}</span>
+                            <span>إجمالي المرتجعات</span><span className="font-semibold">- {formatCurrency(totalReturned)}</span>
                           </div>
                           <div className="flex justify-between px-3 py-1.5 bg-green-50 text-green-700 border-t border-orange-100">
-                            <span>المدفوع للمورد</span>
-                            <span className="font-semibold">{formatCurrency(purchaseDetail.paidAmount)}</span>
+                            <span>المدفوع للمورد</span><span className="font-semibold">{formatCurrency(purchaseDetail.paidAmount)}</span>
                           </div>
                           {refundDue > 0 ? (
                             <div className="flex justify-between font-bold text-blue-700 bg-blue-50 px-3 py-2 border-t border-blue-200">
-                              <span>💵 مسترد من المورد</span>
-                              <span>{formatCurrency(refundDue)}</span>
+                              <span>💵 مسترد من المورد</span><span>{formatCurrency(refundDue)}</span>
                             </div>
                           ) : stillOwed > 0 ? (
                             <div className="flex justify-between font-bold text-red-700 bg-red-50 px-3 py-2 border-t border-red-200">
-                              <span>باقي علينا للمورد</span>
-                              <span>+ {formatCurrency(stillOwed)}</span>
+                              <span>باقي علينا للمورد</span><span>+ {formatCurrency(stillOwed)}</span>
                             </div>
                           ) : (
                             <div className="flex justify-between font-bold text-green-700 bg-green-50 px-3 py-2 border-t border-green-200">
-                              <span>✓ الحساب مسوَّى تماماً</span>
-                              <span>{formatCurrency(0)}</span>
+                              <span>✓ الحساب مسوَّى تماماً</span><span>{formatCurrency(0)}</span>
                             </div>
                           )}
                         </div>
@@ -389,7 +404,6 @@ export default function Purchases() {
                     </div>
                   );
                 })()}
-
                 {purchaseDetail.notes && (
                   <p className="text-xs text-gray-500 border-t pt-2">ملاحظات: {purchaseDetail.notes}</p>
                 )}
@@ -399,6 +413,10 @@ export default function Purchases() {
                 <Button variant="outline" className="flex-1" onClick={() => setSelectedPurchaseId(null)}>
                   إغلاق
                 </Button>
+                <Button variant="outline" className="text-blue-500 border-blue-200"
+                  onClick={() => { setSelectedPurchaseId(null); setAddItemsPurchaseId(purchaseDetail.id); }}>
+                  <PackagePlus className="w-4 h-4 ml-1" />إضافة منتجات
+                </Button>
                 <Button variant="outline" className="text-orange-500 border-orange-200"
                   onClick={() => { setSelectedPurchaseId(null); openReturn(purchaseDetail); }}>
                   <RotateCcw className="w-4 h-4 ml-1" />مرتجع
@@ -406,6 +424,71 @@ export default function Purchases() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          ADD ITEMS DIALOG
+      ══════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={!!addItemsPurchaseId}
+        onOpenChange={(open) => { if (!open) { setAddItemsPurchaseId(null); setAddItemsList([]); } }}>
+        <DialogContent dir="rtl" className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PackagePlus className="w-5 h-5 text-blue-500" />
+              إضافة منتجات لفاتورة موجودة
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Select value={addNewProduct} onValueChange={(v) => {
+                setAddNewProduct(v);
+                const p = products?.find(pr => pr.id === parseInt(v));
+                if (p) setAddNewPrice(p.costPrice.toString());
+              }}>
+                <SelectTrigger className="flex-1"><SelectValue placeholder="اختر منتج" /></SelectTrigger>
+                <SelectContent>{(products ?? []).map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input type="number" placeholder="ك" value={addNewQty} onChange={e => setAddNewQty(e.target.value)} className="w-16" />
+              <Input type="number" step="0.01" placeholder="سعر" value={addNewPrice} onChange={e => setAddNewPrice(e.target.value)} className="w-24" />
+              <Button type="button" onClick={addNewItemToList}><Plus className="w-4 h-4" /></Button>
+            </div>
+
+            {addItemsList.length > 0 && (
+              <div className="space-y-1">
+                {addItemsList.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5 text-sm">
+                    <span>{item.productName}</span>
+                    <span>{item.quantity} × {formatCurrency(item.costPrice)} = {formatCurrency(item.quantity * item.costPrice)}</span>
+                    <button onClick={() => setAddItemsList(prev => prev.filter((_, j) => j !== i))} className="text-destructive mr-2">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex justify-between font-bold text-sm px-1 pt-1 border-t">
+                  <span>الإضافة الكلية</span>
+                  <span className="text-blue-600">{formatCurrency(addTotal)}</span>
+                </div>
+              </div>
+            )}
+
+            <Separator />
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => { setAddItemsPurchaseId(null); setAddItemsList([]); }}>إلغاء</Button>
+              <Button className="flex-1 bg-blue-500 hover:bg-blue-600"
+                disabled={!addItemsList.length || addItemsMutation.isPending}
+                onClick={() => {
+                  if (!addItemsPurchaseId) return;
+                  addItemsMutation.mutate({
+                    id: addItemsPurchaseId,
+                    data: { items: addItemsList.map(i => ({ productId: i.productId, quantity: i.quantity, costPrice: i.costPrice })) },
+                  });
+                }}>
+                {addItemsMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                إضافة للفاتورة ({formatCurrency(addTotal)})
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -424,52 +507,39 @@ export default function Purchases() {
 
           {returnPurchaseDetail && (
             <div className="space-y-4">
-              {/* Success state */}
               {returnSuccess ? (
                 <div className="space-y-3">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
                     <p className="font-bold text-green-700 text-lg">✓ تم تسجيل المرتجع</p>
                     <p className="text-green-600 text-sm mt-1">قيمة المرتجع: {formatCurrency(returnSuccess.returnAmount)}</p>
                   </div>
-                  {/* Post-return balance */}
                   {(() => {
-                    const grandTotal  = returnSuccess.purchaseTotal;
-                    const allReturns  = (returnPurchaseReturns ?? []).reduce(
+                    const allRets = (returnPurchaseReturns ?? []).reduce(
                       (s: number, r: any) => s + parseFloat(r.return_amount ?? 0), 0
                     );
-                    const netOwed  = grandTotal - allReturns;
-                    const balance  = netOwed - returnSuccess.paidAmount;
+                    const net = returnSuccess.purchaseTotal - allRets;
+                    const balance = net - returnSuccess.paidAmount;
                     return (
                       <div className={`border-2 rounded-lg p-3 text-center ${balance < -0.005 ? "border-blue-300 bg-blue-50" : balance > 0.005 ? "border-red-300 bg-red-50" : "border-green-300 bg-green-50"}`}>
                         {balance < -0.005 ? (
-                          <>
-                            <p className="font-bold text-blue-700">💵 مسترد من المورد</p>
-                            <p className="text-blue-600 text-xl font-bold">{formatCurrency(Math.abs(balance))}</p>
-                          </>
+                          <><p className="font-bold text-blue-700">💵 مسترد من المورد</p><p className="text-blue-600 text-xl font-bold">{formatCurrency(Math.abs(balance))}</p></>
                         ) : balance > 0.005 ? (
-                          <>
-                            <p className="font-bold text-red-700">باقي علينا للمورد</p>
-                            <p className="text-red-600 text-xl font-bold">+ {formatCurrency(balance)}</p>
-                          </>
+                          <><p className="font-bold text-red-700">باقي علينا للمورد</p><p className="text-red-600 text-xl font-bold">+ {formatCurrency(balance)}</p></>
                         ) : (
                           <p className="font-bold text-green-700 text-lg">✓ الحساب مسوَّى</p>
                         )}
                       </div>
                     );
                   })()}
-                  <Button className="w-full" onClick={() => { setReturnPurchaseId(null); setReturnItems([]); setReturnSuccess(null); }}>
-                    إغلاق
-                  </Button>
+                  <Button className="w-full" onClick={() => { setReturnPurchaseId(null); setReturnItems([]); setReturnSuccess(null); }}>إغلاق</Button>
                 </div>
               ) : (
                 <>
-                  {/* Summary bar */}
                   <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 text-sm flex justify-between">
                     <span className="text-orange-700">إجمالي الفاتورة</span>
                     <span className="font-bold text-orange-800">{formatCurrency(returnPurchaseDetail.totalAmount)}</span>
                   </div>
 
-                  {/* Step 1: show available items */}
                   {returnItems.length === 0 && (() => {
                     const alreadyRet: Record<number, number> = {};
                     for (const ret of (returnPurchaseReturns ?? [])) {
@@ -478,26 +548,21 @@ export default function Purchases() {
                       }
                     }
                     const availableItems = returnPurchaseDetail.items.map((i: any) => ({
-                      ...i,
-                      available: Math.max(0, i.quantity - (alreadyRet[i.productId] ?? 0)),
-                      returned:  alreadyRet[i.productId] ?? 0,
+                      ...i, available: Math.max(0, i.quantity - (alreadyRet[i.productId] ?? 0)),
+                      returned: alreadyRet[i.productId] ?? 0,
                     }));
                     const hasAny = availableItems.some((i: any) => i.available > 0);
                     return (
                       <div>
-                        <p className="text-sm text-muted-foreground mb-2">الكميات المتاحة للإرجاع للمورد:</p>
+                        <p className="text-sm text-muted-foreground mb-2">الكميات المتاحة للإرجاع:</p>
                         <div className="space-y-1.5">
                           {availableItems.map((item: any) => (
                             <div key={item.productId}
                               className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${item.available === 0 ? "bg-muted/40 opacity-50" : "bg-muted"}`}>
-                              <span className={item.available === 0 ? "line-through text-muted-foreground" : "font-medium"}>
-                                {item.productName}
-                              </span>
+                              <span className={item.available === 0 ? "line-through text-muted-foreground" : "font-medium"}>{item.productName}</span>
                               <div className="text-xs text-left">
                                 {item.returned > 0 && <span className="text-orange-500 block">تم إرجاع {item.returned}</span>}
-                                <span className={item.available === 0 ? "text-muted-foreground" : "text-green-600 font-medium"}>
-                                  متاح: {item.available}
-                                </span>
+                                <span className={item.available === 0 ? "text-muted-foreground" : "text-green-600 font-medium"}>متاح: {item.available}</span>
                               </div>
                             </div>
                           ))}
@@ -508,14 +573,13 @@ export default function Purchases() {
                           </Button>
                         ) : (
                           <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3 text-center text-sm text-green-700">
-                            ✓ تم إرجاع جميع المنتجات من هذه الفاتورة
+                            ✓ تم إرجاع جميع المنتجات
                           </div>
                         )}
                       </div>
                     );
                   })()}
 
-                  {/* Step 2: quantity selector */}
                   {returnItems.length > 0 && (
                     <>
                       <div className="space-y-2">
@@ -523,21 +587,17 @@ export default function Purchases() {
                           <div key={item.productId} className="border rounded-lg p-3">
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-sm font-medium">{item.productName}</span>
-                              <span className="text-xs text-muted-foreground">متاح للإرجاع: {item.maxQty}</span>
+                              <span className="text-xs text-muted-foreground">متاح: {item.maxQty}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <button onClick={() => updateReturnQty(idx, -1)}
-                                className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
+                              <button onClick={() => updateReturnQty(idx, -1)} className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
                                 <Minus className="w-3 h-3" />
                               </button>
                               <span className="w-10 text-center font-bold">{item.qty}</span>
-                              <button onClick={() => updateReturnQty(idx, 1)}
-                                className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
+                              <button onClick={() => updateReturnQty(idx, 1)} className="w-7 h-7 rounded border flex items-center justify-center hover:bg-muted">
                                 <Plus className="w-3 h-3" />
                               </button>
-                              <span className="text-xs text-muted-foreground mr-auto">
-                                = {formatCurrency(item.qty * item.costPrice)}
-                              </span>
+                              <span className="text-xs text-muted-foreground mr-auto">= {formatCurrency(item.qty * item.costPrice)}</span>
                             </div>
                           </div>
                         ))}
@@ -549,50 +609,39 @@ export default function Purchases() {
                           placeholder="عيب، خطأ في الطلب..." className="h-8 mt-1 text-sm" />
                       </div>
 
-                      {/* Balance preview */}
                       {returnTotal > 0 && (() => {
-                        const grandTotal = returnPurchaseDetail.totalAmount;
-                        const prevRetTotal = (returnPurchaseReturns ?? []).reduce(
+                        const prevRet = (returnPurchaseReturns ?? []).reduce(
                           (s: number, r: any) => s + parseFloat(r.return_amount ?? 0), 0
                         );
-                        const totalRetAfterThis = prevRetTotal + returnTotal;
-                        const netOwed  = grandTotal - totalRetAfterThis;
-                        // balance: positive = we owe supplier; negative = supplier owes us
-                        const balance  = netOwed - returnPurchaseDetail.paidAmount;
+                        const netOwed = returnPurchaseDetail.totalAmount - (prevRet + returnTotal);
+                        const balance = netOwed - returnPurchaseDetail.paidAmount;
                         return (
                           <div className="border border-orange-200 rounded-lg overflow-hidden text-sm">
                             <div className="bg-orange-50 px-3 py-2 flex justify-between font-bold text-orange-700">
-                              <span>هذا المرتجع</span>
-                              <span>- {formatCurrency(returnTotal)}</span>
+                              <span>هذا المرتجع</span><span>- {formatCurrency(returnTotal)}</span>
                             </div>
-                            {prevRetTotal > 0 && (
+                            {prevRet > 0 && (
                               <div className="px-3 py-1.5 flex justify-between text-orange-500 bg-orange-50/60 border-t border-orange-100 text-xs">
-                                <span>مرتجعات سابقة</span>
-                                <span>- {formatCurrency(prevRetTotal)}</span>
+                                <span>مرتجعات سابقة</span><span>- {formatCurrency(prevRet)}</span>
                               </div>
                             )}
                             <div className="px-3 py-2 flex justify-between text-muted-foreground bg-white border-t border-orange-100">
-                              <span>إجمالي الفاتورة</span>
-                              <span>{formatCurrency(grandTotal)}</span>
+                              <span>إجمالي الفاتورة</span><span>{formatCurrency(returnPurchaseDetail.totalAmount)}</span>
                             </div>
                             <div className="px-3 py-2 flex justify-between text-muted-foreground bg-white border-t border-orange-100">
-                              <span>المدفوع للمورد</span>
-                              <span>{formatCurrency(returnPurchaseDetail.paidAmount)}</span>
+                              <span>المدفوع للمورد</span><span>{formatCurrency(returnPurchaseDetail.paidAmount)}</span>
                             </div>
                             {balance > 0.005 ? (
                               <div className="px-3 py-2.5 flex justify-between font-bold text-red-700 bg-red-50 border-t border-red-200">
-                                <span>باقي علينا للمورد بعد المرتجع</span>
-                                <span>+ {formatCurrency(balance)}</span>
+                                <span>باقي علينا للمورد بعد المرتجع</span><span>+ {formatCurrency(balance)}</span>
                               </div>
                             ) : balance < -0.005 ? (
                               <div className="px-3 py-2.5 flex justify-between font-bold text-blue-700 bg-blue-50 border-t border-blue-200">
-                                <span>💵 مسترد من المورد</span>
-                                <span>- {formatCurrency(Math.abs(balance))}</span>
+                                <span>💵 مسترد من المورد</span><span>- {formatCurrency(Math.abs(balance))}</span>
                               </div>
                             ) : (
                               <div className="px-3 py-2.5 flex justify-between font-bold text-green-700 bg-green-50 border-t border-green-200">
-                                <span>✓ الحساب سيُسوَّى تماماً</span>
-                                <span>{formatCurrency(0)}</span>
+                                <span>✓ الحساب سيُسوَّى تماماً</span><span>{formatCurrency(0)}</span>
                               </div>
                             )}
                           </div>
@@ -626,13 +675,14 @@ export default function Purchases() {
           <DialogHeader><DialogTitle>تسجيل مشترى جديد</DialogTitle></DialogHeader>
           <form onSubmit={(e) => {
             e.preventDefault();
-            if (!supplierId || items.length === 0) {
-              toast({ title: "يرجى اختيار المورد وإضافة منتجات", variant: "destructive" });
+            if (!supplierInput.trim() || items.length === 0) {
+              toast({ title: "يرجى كتابة اسم المورد وإضافة منتجات", variant: "destructive" });
               return;
             }
             createMutation.mutate({
               data: {
-                supplierId: parseInt(supplierId),
+                supplierId: supplierId && supplierId !== "0" ? parseInt(supplierId) : undefined,
+                supplierName: !supplierId || supplierId === "0" ? supplierInput.trim() : undefined,
                 invoiceNumber: invoiceNumber || undefined,
                 paymentType, paidAmount: parseFloat(paidAmount),
                 notes: notes || undefined,
@@ -642,25 +692,62 @@ export default function Purchases() {
             });
           }} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
+              {/* ── Supplier combobox ── */}
               <div>
                 <Label>المورد *</Label>
-                <Select value={supplierId} onValueChange={(v) => { setSupplierId(v); setIncludeExistingDebt(false); }}>
-                  <SelectTrigger><SelectValue placeholder="اختر المورد" /></SelectTrigger>
-                  <SelectContent>
-                    {(suppliers ?? []).map(s => (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.name}
-                        {s.totalDebt > 0 && <span className="text-red-500 text-xs mr-2">({formatCurrency(s.totalDebt)} دين)</span>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative mt-1" ref={supplierInputRef}>
+                  <Input
+                    value={supplierInput}
+                    onChange={e => {
+                      setSupplierInput(e.target.value);
+                      setSupplierId("");
+                      setShowSupplierDrop(true);
+                      setIncludeExistingDebt(false);
+                    }}
+                    onFocus={() => setShowSupplierDrop(true)}
+                    placeholder="اختر مورداً أو اكتب اسم جديد..."
+                  />
+                  {showSupplierDrop && supplierInput && (
+                    <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto mt-1">
+                      {filteredSuppliers.map(s => (
+                        <button key={s.id} type="button"
+                          className="w-full text-right px-3 py-2 hover:bg-muted text-sm flex items-center justify-between"
+                          onMouseDown={() => {
+                            setSupplierId(s.id.toString());
+                            setSupplierInput(s.name);
+                            setShowSupplierDrop(false);
+                            setIncludeExistingDebt(false);
+                          }}>
+                          <span>{s.name}</span>
+                          {s.totalDebt > 0 && <span className="text-red-500 text-xs">({formatCurrency(s.totalDebt)} دين)</span>}
+                        </button>
+                      ))}
+                      {!filteredSuppliers.find(s => s.name.toLowerCase() === supplierInput.toLowerCase()) && (
+                        <button type="button"
+                          className="w-full text-right px-3 py-2 hover:bg-blue-50 text-sm text-blue-600 border-t flex items-center gap-1"
+                          onMouseDown={() => { setSupplierId("0"); setShowSupplierDrop(false); }}>
+                          <Plus className="w-3 h-3" /> مورد جديد: "{supplierInput}"
+                        </button>
+                      )}
+                      {filteredSuppliers.length === 0 && supplierInput && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">لا يوجد مورد مطابق</div>
+                      )}
+                    </div>
+                  )}
+                  {supplierId && supplierId !== "0" && (
+                    <p className="text-xs text-green-600 mt-0.5">✓ مورد موجود</p>
+                  )}
+                  {supplierId === "0" && (
+                    <p className="text-xs text-blue-600 mt-0.5">✓ سيتم إنشاء مورد جديد تلقائياً</p>
+                  )}
+                </div>
               </div>
-              <div><Label>رقم الفاتورة</Label><Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></div>
+
+              <div><Label>رقم الفاتورة</Label><Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className="mt-1" /></div>
               <div>
                 <Label>طريقة الدفع</Label>
                 <Select value={paymentType} onValueChange={setPaymentType}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="cash">نقدي</SelectItem>
                     <SelectItem value="credit">آجل</SelectItem>
@@ -668,20 +755,18 @@ export default function Purchases() {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>المبلغ المدفوع</Label><Input type="number" step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} /></div>
+              <div><Label>المبلغ المدفوع</Label><Input type="number" step="0.01" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} className="mt-1" /></div>
             </div>
 
-            {supplierId && supplierPendingDebt && supplierPendingDebt.pendingDebt > 0 && (
+            {supplierId && supplierId !== "0" && supplierPendingDebt && supplierPendingDebt.pendingDebt > 0 && (
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
                 <p className="text-orange-700 font-medium text-sm mb-2">
-                  يوجد دين سابق لهذا المورد: <span className="font-bold">{formatCurrency(supplierPendingDebt.pendingDebt)}</span>
+                  يوجد دين سابق: <span className="font-bold">{formatCurrency(supplierPendingDebt.pendingDebt)}</span>
                 </p>
                 <div className="flex items-center gap-2">
                   <Checkbox id="includeDebt" checked={includeExistingDebt}
                     onCheckedChange={(v) => setIncludeExistingDebt(!!v)} />
-                  <label htmlFor="includeDebt" className="text-sm cursor-pointer">
-                    إضافة الدين السابق لهذه الفاتورة وتسويته
-                  </label>
+                  <label htmlFor="includeDebt" className="text-sm cursor-pointer">إضافة الدين السابق وتسويته في هذه الفاتورة</label>
                 </div>
               </div>
             )}
@@ -697,10 +782,8 @@ export default function Purchases() {
                   <SelectTrigger className="flex-1"><SelectValue placeholder="اختر منتج" /></SelectTrigger>
                   <SelectContent>{(products ?? []).map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}</SelectContent>
                 </Select>
-                <Input type="number" placeholder="الكمية" value={itemQty}
-                  onChange={(e) => setItemQty(e.target.value)} className="w-20" />
-                <Input type="number" step="0.01" placeholder="السعر" value={itemPrice}
-                  onChange={(e) => setItemPrice(e.target.value)} className="w-28" />
+                <Input type="number" placeholder="ك" value={itemQty} onChange={(e) => setItemQty(e.target.value)} className="w-16" />
+                <Input type="number" step="0.01" placeholder="سعر" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} className="w-28" />
                 <Button type="button" onClick={addItem}><Plus className="w-4 h-4" /></Button>
               </div>
               {items.length > 0 && (
@@ -719,23 +802,21 @@ export default function Purchases() {
                       <span className="font-bold">{formatCurrency(itemsTotal)}</span>
                     </div>
                     {includeExistingDebt && previousDebt > 0 && (
-                      <div className="flex justify-between text-orange-600">
-                        <span>الدين السابق</span>
-                        <span className="font-bold">+ {formatCurrency(previousDebt)}</span>
-                      </div>
-                    )}
-                    {includeExistingDebt && previousDebt > 0 && (
-                      <div className="flex justify-between font-bold text-base border-t pt-1">
-                        <span>الإجمالي الكلي</span>
-                        <span className="text-primary">{formatCurrency(grandTotal)}</span>
-                      </div>
+                      <>
+                        <div className="flex justify-between text-orange-600">
+                          <span>الدين السابق</span><span className="font-bold">+ {formatCurrency(previousDebt)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-base border-t pt-1">
+                          <span>الإجمالي الكلي</span><span className="text-primary">{formatCurrency(grandTotal)}</span>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
               )}
             </div>
 
-            <div><Label>ملاحظات</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+            <div><Label>ملاحظات</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} className="mt-1" /></div>
 
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={resetForm}>إلغاء</Button>

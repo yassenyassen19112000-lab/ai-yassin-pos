@@ -157,4 +157,63 @@ router.get("/sales/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(await formatSale(sale));
 });
 
+// ── Add items to existing sale ────────────────────────────────────────────────
+router.post("/sales/:id/add-items", requireAuth, async (req: AuthenticatedRequest, res): Promise<void> => {
+  const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
+  const { items } = req.body;
+  if (!items?.length) { res.status(400).json({ error: "يجب إضافة منتجات" }); return; }
+
+  const [sale] = await db.select().from(salesTable).where(eq(salesTable.id, id));
+  if (!sale) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
+
+  let additionalTotal = 0;
+  for (const item of items) {
+    const total = item.quantity * item.sellingPrice;
+    additionalTotal += total;
+    const [product] = await db.select().from(productsTable).where(eq(productsTable.id, item.productId));
+    await db.insert(saleItemsTable).values({
+      saleId: id,
+      productId: item.productId,
+      productName: product?.name ?? "منتج",
+      quantity: item.quantity,
+      sellingPrice: item.sellingPrice.toString(),
+      total: total.toString(),
+    });
+    if (product) {
+      await db.update(productsTable)
+        .set({ quantity: Math.max(0, product.quantity - item.quantity) })
+        .where(eq(productsTable.id, item.productId));
+    }
+  }
+
+  const newTotal     = parseFloat(sale.totalAmount  as string) + additionalTotal;
+  const newRemaining = parseFloat(sale.remainingDebt as string) + additionalTotal;
+  await db.update(salesTable)
+    .set({ totalAmount: newTotal.toString(), remainingDebt: newRemaining.toString() })
+    .where(eq(salesTable.id, id));
+
+  if (sale.customerName) {
+    const [saleDebt] = await db.select().from(debtsTable)
+      .where(and(eq(debtsTable.saleId, id), ne(debtsTable.status, "paid")));
+    if (saleDebt) {
+      await db.update(debtsTable)
+        .set({
+          totalAmount:     (parseFloat(saleDebt.totalAmount     as string) + additionalTotal).toString(),
+          remainingAmount: (parseFloat(saleDebt.remainingAmount as string) + additionalTotal).toString(),
+          status: "pending",
+        })
+        .where(eq(debtsTable.id, saleDebt.id));
+    } else if (newRemaining > 0) {
+      await db.insert(debtsTable).values({
+        type: "customer", customerName: sale.customerName, customerPhone: sale.customerPhone || null,
+        totalAmount: additionalTotal.toString(), paidAmount: "0",
+        remainingAmount: additionalTotal.toString(), status: "pending", saleId: id,
+      });
+    }
+  }
+
+  const [updated] = await db.select().from(salesTable).where(eq(salesTable.id, id));
+  res.json(await formatSale(updated));
+});
+
 export default router;

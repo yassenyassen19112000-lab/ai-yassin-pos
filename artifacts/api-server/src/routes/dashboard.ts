@@ -33,12 +33,14 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
 
   // ── THIS MONTH — RETURNS ─────────────────────────────────────────────────
   const returnsMonthRow = await db.execute(
-    sql`SELECT COALESCE(SUM(sr.return_amount), 0) AS total
-        FROM sales_returns sr
-        JOIN sales s ON sr.sale_id = s.id
-        WHERE sr.created_at >= ${startOfMonth}`
+    sql`SELECT COALESCE(SUM(return_amount), 0) AS total FROM sales_returns WHERE created_at >= ${startOfMonth}`
   );
   const totalReturnsMonth = parseFloat((returnsMonthRow.rows[0] as any)?.total ?? "0");
+
+  const purchaseReturnsMonthRow = await db.execute(
+    sql`SELECT COALESCE(SUM(return_amount), 0) AS total FROM purchase_returns WHERE created_at >= ${startOfMonth}`
+  );
+  const totalPurchaseReturnsMonth = parseFloat((purchaseReturnsMonthRow.rows[0] as any)?.total ?? "0");
 
   // ── THIS MONTH — PURCHASES ───────────────────────────────────────────────
   const [purchasesMonth] = await db.select({
@@ -124,6 +126,11 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
   );
   const totalReturnsAll = parseFloat((returnsAllRow.rows[0] as any)?.total ?? "0");
 
+  const purchaseReturnsAllRow = await db.execute(
+    sql`SELECT COALESCE(SUM(return_amount), 0) AS total FROM purchase_returns`
+  );
+  const totalPurchaseReturnsAll = parseFloat((purchaseReturnsAllRow.rows[0] as any)?.total ?? "0");
+
   const totalCollectedAll     = parseFloat(salesAll.paidAmount ?? "0");
   const totalInvoicedAll      = parseFloat(salesAll.totalAmount ?? "0");
   const totalPurchasesPaidAll = parseFloat(purchasesAll.paid ?? "0");
@@ -143,13 +150,13 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
   const totalSupplierDebts = parseFloat(supplierDebtsRow?.total ?? "0");
 
   // ── NET POSITIONS ─────────────────────────────────────────────────────────
-  // Cash actually received minus cash actually paid out minus refunds
-  const netCashAllTime   = totalCollectedAll - totalReturnsAll - totalPurchasesPaidAll - totalExpensesAll;
+  // Cash actually received minus cash actually paid out minus refunds (purchase returns = money back from suppliers)
+  const netCashAllTime   = totalCollectedAll - totalReturnsAll + totalPurchaseReturnsAll - totalPurchasesPaidAll - totalExpensesAll;
   // Full financial position = net cash + what customers still owe - what we still owe suppliers
   const netPositionAllTime = netCashAllTime + totalCustomerDebts - totalSupplierDebts;
 
   // Monthly cash flow
-  const netCashMonth = totalSalesCollectedMonth - totalReturnsMonth - totalPurchasesPaidMonth - totalExpensesMonth;
+  const netCashMonth = totalSalesCollectedMonth - totalReturnsMonth + totalPurchaseReturnsMonth - totalPurchasesPaidMonth - totalExpensesMonth;
 
   // ── LOW STOCK ─────────────────────────────────────────────────────────────
   const lowStock = allProducts.filter(p => p.quantity <= p.minStockLevel);
@@ -166,6 +173,9 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
     refundsDueMonth,
     totalReturnsMonth,
     totalSalesCountMonth: salesThisMonth.length,
+
+    // This month — Purchase returns
+    totalPurchaseReturnsMonth,
 
     // This month — Purchases
     totalPurchasesInvoicedMonth,
