@@ -86,7 +86,7 @@ export default function Sales() {
       apiClient(`/api/sales/${id}/add-items`, { method: "POST", body: JSON.stringify(data) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sales"] });
-      qc.invalidateQueries({ queryKey: ["sale", selectedSaleId] });
+      qc.invalidateQueries({ queryKey: ["sale", addItemsSaleId] }); // selectedSaleId is null at this point
       setAddItemsSaleId(null);
       setAddItemsList([]);
       toast({ title: "تم إضافة المنتجات للفاتورة" });
@@ -99,6 +99,7 @@ export default function Sales() {
       apiClient(`/api/sales/${id}/payment`, { method: "POST", body: JSON.stringify({ amount, notes }) }),
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["sales"] });
+      qc.invalidateQueries({ queryKey: ["sale", paymentSaleId] });
       qc.invalidateQueries({ queryKey: ["debts"] });
       setPaymentSaleData(data);
       setPaymentAmount("");
@@ -494,7 +495,8 @@ export default function Sales() {
             /* ── Input state ── */
             <div className="space-y-4">
               {(() => {
-                const sale = (sales ?? []).find(s => s.id === paymentSaleId);
+                // Prefer saleDetail (freshest) then fall back to list
+                const sale = saleDetail ?? (sales ?? []).find(s => s.id === paymentSaleId);
                 return sale ? (
                   <div className="bg-muted rounded-lg p-3 text-sm">
                     <p className="font-medium">{sale.customerName || "عميل نقدي"} — {sale.invoiceNumber}</p>
@@ -520,7 +522,7 @@ export default function Sales() {
               </div>
 
               {paymentAmount && parseFloat(paymentAmount) > 0 && (() => {
-                const sale = (sales ?? []).find(s => s.id === paymentSaleId);
+                const sale = saleDetail ?? (sales ?? []).find(s => s.id === paymentSaleId);
                 if (!sale) return null;
                 const remaining = Math.max(0, sale.remainingDebt - parseFloat(paymentAmount));
                 return (

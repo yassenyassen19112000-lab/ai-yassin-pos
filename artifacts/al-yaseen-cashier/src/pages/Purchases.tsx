@@ -238,6 +238,7 @@ export default function Purchases() {
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
       qc.invalidateQueries({ queryKey: ["purchase-detail", paymentPurchaseId] });
+      qc.invalidateQueries({ queryKey: ["purchase-detail", selectedPurchaseId] });
       qc.invalidateQueries({ queryKey: ["debts"] });
       setPaymentPurchaseData(data);
       setPaymentAmount("");
@@ -590,7 +591,7 @@ export default function Purchases() {
           ) : (
             <div className="space-y-4">
               {(() => {
-                const purchase = (purchases ?? []).find(p => p.id === paymentPurchaseId);
+                const purchase = purchaseDetail ?? (purchases ?? []).find(p => p.id === paymentPurchaseId);
                 return purchase ? (
                   <div className="bg-muted rounded-lg p-3 text-sm">
                     <p className="font-medium">{purchase.supplierName}</p>
@@ -613,7 +614,7 @@ export default function Purchases() {
               </div>
 
               {paymentAmount && parseFloat(paymentAmount) > 0 && (() => {
-                const purchase = (purchases ?? []).find(p => p.id === paymentPurchaseId);
+                const purchase = purchaseDetail ?? (purchases ?? []).find(p => p.id === paymentPurchaseId);
                 if (!purchase) return null;
                 const remaining = Math.max(0, purchase.remainingAmount - parseFloat(paymentAmount));
                 return (
