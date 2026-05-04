@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Minus, Printer, MessageCircle, Loader2, ShoppingCart, X, Check, User, AlertTriangle } from "lucide-react";
+import { Plus, Minus, Printer, MessageCircle, Loader2, ShoppingCart, X, Check, User, AlertTriangle, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface CartItem {
@@ -45,9 +45,11 @@ export default function POS() {
   const [notes, setNotes] = useState("");
   const [successSale, setSuccessSale] = useState<any>(null);
   const [showCustomerSuggestions, setShowCustomerSuggestions] = useState(false);
-  const [selectedProductId, setSelectedProductId] = useState("");
   const [addQty, setAddQty] = useState("1");
+  const [productSearch, setProductSearch] = useState("");
+  const [showProductDrop, setShowProductDrop] = useState(false);
   const customerRef = useRef<HTMLDivElement>(null);
+  const productRef  = useRef<HTMLDivElement>(null);
 
   const { data: products } = useListProducts({});
   const { data: customerDebts } = useGetCustomerDebts(
@@ -73,6 +75,11 @@ export default function POS() {
   const paid = paymentType === "cash" ? totalWithDebt : parseFloat(paidAmount || "0");
   const remaining = Math.max(0, totalWithDebt - paid);
 
+  // Filtered products for search dropdown
+  const filteredProducts = (products ?? []).filter(p =>
+    !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase())
+  );
+
   const createSale = useCreateSale({
     mutation: {
       onSuccess: (data) => {
@@ -86,7 +93,7 @@ export default function POS() {
         setPaidAmount("");
         setDiscountAmount("0");
         setNotes("");
-        setSelectedProductId("");
+        setProductSearch("");
         toast({ title: "تم إنشاء الفاتورة بنجاح" });
         const phone = data.customerPhone?.replace(/[^0-9]/g, "") || "";
         if (phone) {
@@ -111,10 +118,7 @@ export default function POS() {
     (sale.remainingDebt > 0 ? `المتبقي: ${formatCurrency(sale.remainingDebt)}\n` : "") +
     `شكراً لتعاملكم معنا`;
 
-  const handleAddProduct = () => {
-    if (!selectedProductId) return;
-    const product = (products ?? []).find(p => p.id === parseInt(selectedProductId));
-    if (!product) return;
+  const addProductToCart = (product: (typeof products)[0]) => {
     const qty = parseInt(addQty) || 1;
     setCart(prev => {
       const existing = prev.find(i => i.productId === product.id);
@@ -129,7 +133,8 @@ export default function POS() {
         unit: product.unit,
       }];
     });
-    setSelectedProductId("");
+    setProductSearch("");
+    setShowProductDrop(false);
     setAddQty("1");
   };
 
@@ -164,6 +169,9 @@ export default function POS() {
       if (customerRef.current && !customerRef.current.contains(e.target as Node)) {
         setShowCustomerSuggestions(false);
       }
+      if (productRef.current && !productRef.current.contains(e.target as Node)) {
+        setShowProductDrop(false);
+      }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -189,34 +197,51 @@ export default function POS() {
       <div className="grid lg:grid-cols-3 gap-4">
         {/* Product selector + cart */}
         <div className="lg:col-span-2 space-y-3">
-          {/* Product dropdown */}
+          {/* Product search combobox */}
           <Card>
             <CardContent className="pt-4">
-              <Label className="text-sm font-medium mb-2 block">اختر منتج</Label>
+              <Label className="text-sm font-medium mb-2 block">ابحث عن منتج</Label>
               <div className="flex gap-2">
-                <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="اختر منتج من القائمة..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(products ?? []).map(p => (
-                      <SelectItem
-                        key={p.id}
-                        value={p.id.toString()}
-                        disabled={p.quantity === 0}
-                      >
-                        <div className="flex items-center gap-2 w-full">
-                          <span className={p.quantity === 0 ? "text-muted-foreground" : ""}>{p.name}</span>
-                          <span className="text-primary font-bold text-xs">{formatCurrency(p.sellingPrice)}</span>
-                          <span className={`text-xs mr-auto ${p.isLowStock && p.quantity > 0 ? "text-orange-500" : p.quantity === 0 ? "text-red-500" : "text-muted-foreground"}`}>
-                            {p.quantity === 0 ? "نفد" : `${p.quantity} ${p.unit}`}
-                            {p.isLowStock && p.quantity > 0 && " ⚠️"}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex-1 relative" ref={productRef}>
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    value={productSearch}
+                    onChange={e => { setProductSearch(e.target.value); setShowProductDrop(true); }}
+                    onFocus={() => setShowProductDrop(true)}
+                    placeholder="اكتب اسم المنتج للبحث..."
+                    className="pr-9"
+                  />
+                  {showProductDrop && (
+                    <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-60 overflow-y-auto">
+                      {filteredProducts.length === 0 ? (
+                        <p className="text-center text-sm text-muted-foreground py-4">لا توجد منتجات مطابقة</p>
+                      ) : (
+                        filteredProducts.map(p => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={p.quantity === 0}
+                            onMouseDown={() => addProductToCart(p)}
+                            className={`w-full text-right px-3 py-2.5 text-sm transition-colors flex items-center justify-between gap-2 border-b last:border-0 ${
+                              p.quantity === 0 ? "opacity-40 cursor-not-allowed bg-gray-50" : "hover:bg-muted cursor-pointer"
+                            }`}
+                          >
+                            <span className={`font-medium ${p.quantity === 0 ? "line-through text-muted-foreground" : ""}`}>
+                              {p.name}
+                            </span>
+                            <div className="flex items-center gap-3 shrink-0 text-xs">
+                              <span className="text-primary font-bold">{formatCurrency(p.sellingPrice)}</span>
+                              <span className={p.quantity === 0 ? "text-red-500" : p.isLowStock ? "text-orange-500" : "text-muted-foreground"}>
+                                {p.quantity === 0 ? "نفد" : `${p.quantity} ${p.unit}`}
+                                {p.isLowStock && p.quantity > 0 ? " ⚠️" : ""}
+                              </span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
                 <Input
                   type="number"
                   min="1"
@@ -225,26 +250,10 @@ export default function POS() {
                   className="w-20"
                   placeholder="كمية"
                 />
-                <Button onClick={handleAddProduct} disabled={!selectedProductId}>
-                  <Plus className="w-4 h-4 ml-1" />
-                  إضافة
-                </Button>
               </div>
-
-              {/* Show selected product info */}
-              {selectedProductId && (() => {
-                const p = (products ?? []).find(pr => pr.id === parseInt(selectedProductId));
-                if (!p) return null;
-                return (
-                  <div className="mt-2 bg-muted rounded-lg px-3 py-2 text-sm flex items-center gap-3">
-                    <span className="font-medium">{p.name}</span>
-                    <span className="text-primary font-bold">{formatCurrency(p.sellingPrice)}</span>
-                    <span className={`text-xs ${p.isLowStock ? "text-orange-500" : "text-muted-foreground"}`}>
-                      المتاح: {p.quantity} {p.unit}
-                    </span>
-                  </div>
-                );
-              })()}
+              <p className="text-xs text-muted-foreground mt-1.5">
+                اكتب لتصفية المنتجات واضغط على المنتج لإضافته للسلة
+              </p>
             </CardContent>
           </Card>
 
@@ -258,7 +267,7 @@ export default function POS() {
             </CardHeader>
             <CardContent>
               {cart.length === 0 ? (
-                <p className="text-center text-muted-foreground text-sm py-6">السلة فارغة — اختر منتجاً من القائمة</p>
+                <p className="text-center text-muted-foreground text-sm py-6">السلة فارغة — ابحث عن منتج وأضفه</p>
               ) : (
                 <div className="space-y-1">
                   {cart.map(item => (

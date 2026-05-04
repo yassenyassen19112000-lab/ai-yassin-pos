@@ -22,9 +22,94 @@ import { Separator } from "@/components/ui/separator";
 import { Plus, Loader2, Trash2, Receipt, Search, Minus, RotateCcw, PackagePlus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-interface PurchaseItem { productId: number; productName: string; quantity: number; costPrice: number; }
-interface ReturnItem   { productId: number; productName: string; qty: number; maxQty: number; costPrice: number; }
-interface AddItem      { productId: number; productName: string; quantity: number; costPrice: number; }
+interface PurchaseItem {
+  productId?: number;
+  productName: string;
+  quantity: number;
+  costPrice: number;
+  isNew?: boolean;
+}
+interface ReturnItem { productId: number; productName: string; qty: number; maxQty: number; costPrice: number; }
+interface AddItem    { productId: number; productName: string; quantity: number; costPrice: number; }
+
+// ── Inline product combobox ────────────────────────────────────────────────
+function ProductCombobox({
+  products,
+  value,
+  onSelect,
+  placeholder = "اكتب اسم المنتج...",
+}: {
+  products: any[];
+  value: string;
+  onSelect: (product: { id?: number; name: string; costPrice: number; isNew: boolean }) => void;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const filtered = products.filter(p =>
+    !value || p.name.toLowerCase().includes(value.toLowerCase())
+  );
+  const exactMatch = products.find(p => p.name.toLowerCase() === value.toLowerCase());
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setShow(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="relative flex-1" ref={ref}>
+      <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+      <Input
+        value={value}
+        onChange={e => {
+          onSelect({ id: undefined, name: e.target.value, costPrice: 0, isNew: true });
+          setShow(true);
+        }}
+        onFocus={() => setShow(true)}
+        placeholder={placeholder}
+        className="pr-9"
+      />
+      {show && (
+        <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-52 overflow-y-auto">
+          {filtered.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={() => {
+                onSelect({ id: p.id, name: p.name, costPrice: p.costPrice, isNew: false });
+                setShow(false);
+              }}
+              className="w-full text-right px-3 py-2 hover:bg-muted text-sm flex items-center justify-between border-b last:border-0"
+            >
+              <span className="font-medium">{p.name}</span>
+              <span className="text-primary text-xs font-bold">{formatCurrency(p.costPrice)}</span>
+            </button>
+          ))}
+          {value && !exactMatch && (
+            <button
+              type="button"
+              onMouseDown={() => {
+                onSelect({ id: undefined, name: value, costPrice: 0, isNew: true });
+                setShow(false);
+              }}
+              className="w-full text-right px-3 py-2 hover:bg-blue-50 text-sm text-blue-600 border-t flex items-center gap-2"
+            >
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>إنشاء منتج جديد: "<strong>{value}</strong>"</span>
+            </button>
+          )}
+          {filtered.length === 0 && !value && (
+            <p className="text-center text-sm text-muted-foreground py-4">لا توجد منتجات</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Purchases() {
   // ── new purchase form ─────────────────────────────────────────────────────
@@ -37,9 +122,14 @@ export default function Purchases() {
   const [paidAmount, setPaidAmount]           = useState("0");
   const [notes, setNotes]                     = useState("");
   const [items, setItems]                     = useState<PurchaseItem[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState("");
+
+  // product combobox state for new-purchase form
+  const [itemProductName, setItemProductName] = useState("");
+  const [itemProductId, setItemProductId]     = useState<number | undefined>(undefined);
+  const [itemIsNew, setItemIsNew]             = useState(false);
   const [itemQty, setItemQty]                 = useState("1");
   const [itemPrice, setItemPrice]             = useState("");
+
   const [includeExistingDebt, setIncludeExistingDebt] = useState(false);
   const [search, setSearch]                   = useState("");
   const supplierInputRef = useRef<HTMLDivElement>(null);
@@ -56,7 +146,8 @@ export default function Purchases() {
   // ── add-items dialog ──────────────────────────────────────────────────────
   const [addItemsPurchaseId, setAddItemsPurchaseId] = useState<number | null>(null);
   const [addItemsList, setAddItemsList]             = useState<AddItem[]>([]);
-  const [addNewProduct, setAddNewProduct]           = useState("");
+  const [addNewProductName, setAddNewProductName]   = useState("");
+  const [addNewProductId, setAddNewProductId]       = useState<number | undefined>(undefined);
   const [addNewQty, setAddNewQty]                   = useState("1");
   const [addNewPrice, setAddNewPrice]               = useState("");
 
@@ -84,7 +175,6 @@ export default function Purchases() {
     queryFn:  () => apiClient(`/api/purchases/${selectedPurchaseId}/returns`),
     enabled:  !!selectedPurchaseId,
   });
-
   const { data: returnPurchaseReturns } = useQuery<any[]>({
     queryKey: ["purchase-returns", returnPurchaseId],
     queryFn:  () => apiClient(`/api/purchases/${returnPurchaseId}/returns`),
@@ -101,6 +191,7 @@ export default function Purchases() {
     mutation: {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
+        qc.invalidateQueries({ queryKey: ["products"] });
         resetForm();
         toast({ title: "تم تسجيل المشترى" });
       },
@@ -128,6 +219,7 @@ export default function Purchases() {
       qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
       qc.invalidateQueries({ queryKey: ["purchase-detail", addItemsPurchaseId] });
       qc.invalidateQueries({ queryKey: ["purchase-detail", selectedPurchaseId] });
+      qc.invalidateQueries({ queryKey: ["products"] });
       setAddItemsPurchaseId(null);
       setAddItemsList([]);
       toast({ title: "تم إضافة المنتجات للفاتورة" });
@@ -135,7 +227,7 @@ export default function Purchases() {
     onError: () => toast({ title: "خطأ في إضافة المنتجات", variant: "destructive" }),
   });
 
-  // ── close dropdown on outside click ──────────────────────────────────────
+  // ── close supplier dropdown on outside click ──────────────────────────────
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (supplierInputRef.current && !supplierInputRef.current.contains(e.target as Node)) {
@@ -148,19 +240,24 @@ export default function Purchases() {
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const addItem = () => {
-    const product = products?.find(p => p.id === parseInt(selectedProduct));
-    if (!product || !itemQty || !itemPrice) return;
+    if (!itemProductName.trim() || !itemQty || !itemPrice) return;
     setItems(prev => [...prev, {
-      productId: product.id, productName: product.name,
-      quantity: parseInt(itemQty), costPrice: parseFloat(itemPrice),
+      productId: itemProductId,
+      productName: itemProductName,
+      quantity: parseInt(itemQty),
+      costPrice: parseFloat(itemPrice),
+      isNew: itemIsNew,
     }]);
-    setSelectedProduct(""); setItemQty("1"); setItemPrice("");
+    setItemProductName(""); setItemProductId(undefined); setItemIsNew(false);
+    setItemQty("1"); setItemPrice("");
   };
 
   const resetForm = () => {
     setShowForm(false);
     setSupplierId(""); setSupplierInput(""); setInvoiceNumber("");
     setPaymentType("cash"); setPaidAmount("0"); setNotes(""); setItems([]);
+    setItemProductName(""); setItemProductId(undefined); setItemIsNew(false);
+    setItemQty("1"); setItemPrice("");
     setIncludeExistingDebt(false);
   };
 
@@ -205,16 +302,6 @@ export default function Purchases() {
         reason: returnReason || undefined,
       },
     });
-  };
-
-  const addNewItemToList = () => {
-    const p = products?.find(pr => pr.id === parseInt(addNewProduct));
-    if (!p || !addNewQty || !addNewPrice) return;
-    setAddItemsList(prev => [...prev, {
-      productId: p.id, productName: p.name,
-      quantity: parseInt(addNewQty), costPrice: parseFloat(addNewPrice),
-    }]);
-    setAddNewProduct(""); setAddNewQty("1"); setAddNewPrice("");
   };
 
   // ── computed ──────────────────────────────────────────────────────────────
@@ -354,8 +441,8 @@ export default function Purchases() {
                 {purchaseReturns && purchaseReturns.length > 0 && (() => {
                   const netOwed = purchaseDetail.totalAmount - totalReturned;
                   const balance = netOwed - purchaseDetail.paidAmount;
-                  const refundDue = balance < -0.005 ? Math.abs(balance) : 0;
-                  const stillOwed = balance > 0.005 ? balance : 0;
+                  const refundDue  = balance < -0.005 ? Math.abs(balance) : 0;
+                  const stillOwed  = balance > 0.005 ? balance : 0;
                   return (
                     <div className="mt-2 pt-3 border-t-2 border-orange-300">
                       <p className="text-xs font-bold text-orange-700 mb-2 flex items-center gap-1">
@@ -440,27 +527,48 @@ export default function Purchases() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <Select value={addNewProduct} onValueChange={(v) => {
-                setAddNewProduct(v);
-                const p = products?.find(pr => pr.id === parseInt(v));
-                if (p) setAddNewPrice(p.costPrice.toString());
-              }}>
-                <SelectTrigger className="flex-1"><SelectValue placeholder="اختر منتج" /></SelectTrigger>
-                <SelectContent>{(products ?? []).map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}</SelectContent>
-              </Select>
-              <Input type="number" placeholder="ك" value={addNewQty} onChange={e => setAddNewQty(e.target.value)} className="w-16" />
-              <Input type="number" step="0.01" placeholder="سعر" value={addNewPrice} onChange={e => setAddNewPrice(e.target.value)} className="w-24" />
-              <Button type="button" onClick={addNewItemToList}><Plus className="w-4 h-4" /></Button>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs">المنتج</Label>
+                <ProductCombobox
+                  products={products ?? []}
+                  value={addNewProductName}
+                  onSelect={({ id, name, costPrice, isNew }) => {
+                    setAddNewProductId(id);
+                    setAddNewProductName(name);
+                    if (!isNew && costPrice) setAddNewPrice(costPrice.toString());
+                  }}
+                />
+              </div>
+              <div className="w-16 space-y-1">
+                <Label className="text-xs">كمية</Label>
+                <Input type="number" value={addNewQty} onChange={e => setAddNewQty(e.target.value)} />
+              </div>
+              <div className="w-24 space-y-1">
+                <Label className="text-xs">سعر التكلفة</Label>
+                <Input type="number" step="0.01" value={addNewPrice} onChange={e => setAddNewPrice(e.target.value)} />
+              </div>
+              <Button type="button" onClick={() => {
+                if (!addNewProductName.trim() || !addNewQty || !addNewPrice) return;
+                const pid = addNewProductId ?? 0;
+                setAddItemsList(prev => [...prev, {
+                  productId: pid,
+                  productName: addNewProductName,
+                  quantity: parseInt(addNewQty),
+                  costPrice: parseFloat(addNewPrice),
+                }]);
+                setAddNewProductName(""); setAddNewProductId(undefined);
+                setAddNewQty("1"); setAddNewPrice("");
+              }}><Plus className="w-4 h-4" /></Button>
             </div>
 
             {addItemsList.length > 0 && (
               <div className="space-y-1">
                 {addItemsList.map((item, i) => (
                   <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5 text-sm">
-                    <span>{item.productName}</span>
-                    <span>{item.quantity} × {formatCurrency(item.costPrice)} = {formatCurrency(item.quantity * item.costPrice)}</span>
-                    <button onClick={() => setAddItemsList(prev => prev.filter((_, j) => j !== i))} className="text-destructive mr-2">
+                    <span className="flex-1 truncate">{item.productName}</span>
+                    <span className="mx-2 text-xs text-muted-foreground">{item.quantity} × {formatCurrency(item.costPrice)} = {formatCurrency(item.quantity * item.costPrice)}</span>
+                    <button onClick={() => setAddItemsList(prev => prev.filter((_, j) => j !== i))} className="text-destructive">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -602,13 +710,11 @@ export default function Purchases() {
                           </div>
                         ))}
                       </div>
-
                       <div>
                         <Label className="text-xs">سبب المرتجع (اختياري)</Label>
                         <Input value={returnReason} onChange={e => setReturnReason(e.target.value)}
                           placeholder="عيب، خطأ في الطلب..." className="h-8 mt-1 text-sm" />
                       </div>
-
                       {returnTotal > 0 && (() => {
                         const prevRet = (returnPurchaseReturns ?? []).reduce(
                           (s: number, r: any) => s + parseFloat(r.return_amount ?? 0), 0
@@ -619,17 +725,6 @@ export default function Purchases() {
                           <div className="border border-orange-200 rounded-lg overflow-hidden text-sm">
                             <div className="bg-orange-50 px-3 py-2 flex justify-between font-bold text-orange-700">
                               <span>هذا المرتجع</span><span>- {formatCurrency(returnTotal)}</span>
-                            </div>
-                            {prevRet > 0 && (
-                              <div className="px-3 py-1.5 flex justify-between text-orange-500 bg-orange-50/60 border-t border-orange-100 text-xs">
-                                <span>مرتجعات سابقة</span><span>- {formatCurrency(prevRet)}</span>
-                              </div>
-                            )}
-                            <div className="px-3 py-2 flex justify-between text-muted-foreground bg-white border-t border-orange-100">
-                              <span>إجمالي الفاتورة</span><span>{formatCurrency(returnPurchaseDetail.totalAmount)}</span>
-                            </div>
-                            <div className="px-3 py-2 flex justify-between text-muted-foreground bg-white border-t border-orange-100">
-                              <span>المدفوع للمورد</span><span>{formatCurrency(returnPurchaseDetail.paidAmount)}</span>
                             </div>
                             {balance > 0.005 ? (
                               <div className="px-3 py-2.5 flex justify-between font-bold text-red-700 bg-red-50 border-t border-red-200">
@@ -647,7 +742,6 @@ export default function Purchases() {
                           </div>
                         );
                       })()}
-
                       <Separator />
                       <div className="flex gap-2">
                         <Button variant="outline" className="flex-1" onClick={() => setReturnItems([])}>رجوع</Button>
@@ -686,7 +780,12 @@ export default function Purchases() {
                 invoiceNumber: invoiceNumber || undefined,
                 paymentType, paidAmount: parseFloat(paidAmount),
                 notes: notes || undefined,
-                items: items.map(i => ({ productId: i.productId, quantity: i.quantity, costPrice: i.costPrice })),
+                items: items.map(i => ({
+                  productId: i.productId,
+                  productName: !i.productId ? i.productName : undefined,
+                  quantity: i.quantity,
+                  costPrice: i.costPrice,
+                })),
                 includeExistingDebt,
               } as any,
             });
@@ -772,25 +871,40 @@ export default function Purchases() {
             )}
 
             <div>
-              <Label>المنتجات</Label>
-              <div className="flex gap-2 mt-1">
-                <Select value={selectedProduct} onValueChange={(v) => {
-                  setSelectedProduct(v);
-                  const p = products?.find(pr => pr.id === parseInt(v));
-                  if (p) setItemPrice(p.costPrice.toString());
-                }}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="اختر منتج" /></SelectTrigger>
-                  <SelectContent>{(products ?? []).map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <Label>المنتجات *</Label>
+              <div className="flex gap-2 mt-1 items-end">
+                <div className="flex-1">
+                  <ProductCombobox
+                    products={products ?? []}
+                    value={itemProductName}
+                    onSelect={({ id, name, costPrice, isNew }) => {
+                      setItemProductId(id);
+                      setItemProductName(name);
+                      setItemIsNew(isNew);
+                      if (!isNew && costPrice) setItemPrice(costPrice.toString());
+                    }}
+                    placeholder="ابحث أو أنشئ منتجاً..."
+                  />
+                </div>
                 <Input type="number" placeholder="ك" value={itemQty} onChange={(e) => setItemQty(e.target.value)} className="w-16" />
-                <Input type="number" step="0.01" placeholder="سعر" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} className="w-28" />
+                <div className="w-28">
+                  <Input type="number" step="0.01" placeholder="سعر التكلفة" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} />
+                </div>
                 <Button type="button" onClick={addItem}><Plus className="w-4 h-4" /></Button>
               </div>
+              {itemIsNew && itemProductName && (
+                <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> سيتم إنشاء المنتج "{itemProductName}" تلقائياً عند التسجيل
+                </p>
+              )}
               {items.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {items.map((item, i) => (
                     <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5 text-sm">
-                      <span>{item.productName}</span>
+                      <span className="flex items-center gap-1">
+                        {item.isNew && <span className="text-xs bg-blue-100 text-blue-600 px-1 rounded">جديد</span>}
+                        {item.productName}
+                      </span>
                       <span>{item.quantity} × {formatCurrency(item.costPrice)} = {formatCurrency(item.quantity * item.costPrice)}</span>
                       <button type="button" onClick={() => setItems(prev => prev.filter((_, j) => j !== i))}
                         className="text-destructive mr-2"><Trash2 className="w-3.5 h-3.5" /></button>

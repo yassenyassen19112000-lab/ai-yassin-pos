@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, CreditCard, Plus, Phone } from "lucide-react";
+import { Loader2, CreditCard, Plus, Phone, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 function DebtCard({ debt, onPay }: { debt: any; onPay: (debt: any) => void }) {
@@ -72,15 +72,17 @@ function DebtCard({ debt, onPay }: { debt: any; onPay: (debt: any) => void }) {
 }
 
 export default function Debts() {
-  const [payingDebt, setPayingDebt] = useState<any>(null);
-  const [payAmount, setPayAmount] = useState("");
-  const [payNotes, setPayNotes] = useState("");
-  const [addDebtOpen, setAddDebtOpen] = useState(false);
-  const [addDebtType, setAddDebtType] = useState<"customer" | "supplier">("customer");
+  const [payingDebt, setPayingDebt]     = useState<any>(null);
+  const [payAmount, setPayAmount]       = useState("");
+  const [payNotes, setPayNotes]         = useState("");
+  const [addDebtOpen, setAddDebtOpen]   = useState(false);
+  const [addDebtType, setAddDebtType]   = useState<"customer" | "supplier">("customer");
   const [selectedParty, setSelectedParty] = useState<any>(null);
-  const [debtAmount, setDebtAmount] = useState("");
-  const [debtNotes, setDebtNotes] = useState("");
-  const [partySearch, setPartySearch] = useState("");
+  const [debtAmount, setDebtAmount]     = useState("");
+  const [debtNotes, setDebtNotes]       = useState("");
+  const [partySearch, setPartySearch]   = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [supplierSearch, setSupplierSearch] = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -138,7 +140,6 @@ export default function Debts() {
   const handleAddDebt = () => {
     if (!selectedParty) { toast({ title: "اختر العميل أو المورد", variant: "destructive" }); return; }
     if (!debtAmount || parseFloat(debtAmount) <= 0) { toast({ title: "أدخل مبلغ الدين", variant: "destructive" }); return; }
-
     addDebtMutation.mutate({
       type: addDebtType,
       customerName: addDebtType === "customer" ? selectedParty.name : undefined,
@@ -150,8 +151,23 @@ export default function Debts() {
     });
   };
 
-  const totalCustomerDebt = (customerDebts ?? []).filter(d => d.status !== "paid").reduce((s, d) => s + d.remainingAmount, 0);
-  const totalSupplierDebt = (supplierDebts ?? []).filter(d => d.status !== "paid").reduce((s, d) => s + d.remainingAmount, 0);
+  // Only show non-paid debts + apply search filter
+  const activeCustomerDebts = (customerDebts ?? []).filter(d => {
+    if (d.status === "paid") return false;
+    if (!customerSearch) return true;
+    const name = (d.customerName ?? "").toLowerCase();
+    return name.includes(customerSearch.toLowerCase());
+  });
+
+  const activeSupplierDebts = (supplierDebts ?? []).filter(d => {
+    if (d.status === "paid") return false;
+    if (!supplierSearch) return true;
+    const name = (d.supplierName ?? "").toLowerCase();
+    return name.includes(supplierSearch.toLowerCase());
+  });
+
+  const totalCustomerDebt = activeCustomerDebts.reduce((s, d) => s + d.remainingAmount, 0);
+  const totalSupplierDebt = activeSupplierDebts.reduce((s, d) => s + d.remainingAmount, 0);
 
   const partyList = addDebtType === "customer" ? (customers ?? []) : (suppliers ?? []);
   const filteredPartyList = partySearch
@@ -185,32 +201,42 @@ export default function Debts() {
 
       <Tabs defaultValue="customer">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="customer">ديون العملاء ({(customerDebts ?? []).filter(d => d.status !== "paid").length})</TabsTrigger>
-          <TabsTrigger value="supplier">ديون للموردين ({(supplierDebts ?? []).filter(d => d.status !== "paid").length})</TabsTrigger>
+          <TabsTrigger value="customer">ديون العملاء ({activeCustomerDebts.length})</TabsTrigger>
+          <TabsTrigger value="supplier">ديون للموردين ({activeSupplierDebts.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="customer" className="mt-4">
+        <TabsContent value="customer" className="mt-4 space-y-3">
+          <div className="relative">
+            <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="بحث باسم العميل..." value={customerSearch}
+              onChange={e => setCustomerSearch(e.target.value)} className="pr-9" />
+          </div>
           {loadingCustomer ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(customerDebts ?? []).map(d => <DebtCard key={d.id} debt={d} onPay={setPayingDebt} />)}
-              {(!customerDebts || customerDebts.length === 0) && (
+              {activeCustomerDebts.map(d => <DebtCard key={d.id} debt={d} onPay={setPayingDebt} />)}
+              {activeCustomerDebts.length === 0 && (
                 <div className="col-span-full text-center py-12 text-muted-foreground">
                   <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                  <p>لا توجد ديون للعملاء</p>
+                  <p>{customerSearch ? "لا توجد نتائج مطابقة" : "لا توجد ديون للعملاء"}</p>
                 </div>
               )}
             </div>
           )}
         </TabsContent>
 
-        <TabsContent value="supplier" className="mt-4">
+        <TabsContent value="supplier" className="mt-4 space-y-3">
+          <div className="relative">
+            <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="بحث باسم المورد..." value={supplierSearch}
+              onChange={e => setSupplierSearch(e.target.value)} className="pr-9" />
+          </div>
           {loadingSupplier ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {(supplierDebts ?? []).map(d => <DebtCard key={d.id} debt={d} onPay={setPayingDebt} />)}
-              {(!supplierDebts || supplierDebts.length === 0) && (
+              {activeSupplierDebts.map(d => <DebtCard key={d.id} debt={d} onPay={setPayingDebt} />)}
+              {activeSupplierDebts.length === 0 && (
                 <div className="col-span-full text-center py-12 text-muted-foreground">
                   <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                  <p>لا توجد ديون للموردين</p>
+                  <p>{supplierSearch ? "لا توجد نتائج مطابقة" : "لا توجد ديون للموردين"}</p>
                 </div>
               )}
             </div>
@@ -258,7 +284,6 @@ export default function Debts() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Type selector */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { setAddDebtType("customer"); setSelectedParty(null); setPartySearch(""); }}
@@ -274,10 +299,8 @@ export default function Debts() {
               </button>
             </div>
 
-            {/* Party selection */}
             <div>
               <Label className="mb-1.5 block">{addDebtType === "customer" ? "اختر العميل" : "اختر المورد"} *</Label>
-
               {selectedParty ? (
                 <div className="flex items-center justify-between bg-primary/5 border border-primary/20 rounded-lg px-3 py-2.5">
                   <div>
@@ -319,32 +342,18 @@ export default function Debts() {
               )}
             </div>
 
-            {/* Amount */}
             <div>
               <Label>مبلغ الدين (ج.م) *</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={debtAmount}
-                onChange={e => setDebtAmount(e.target.value)}
-                placeholder="0.00"
-                className="mt-1"
-              />
+              <Input type="number" step="0.01" min="0.01" value={debtAmount}
+                onChange={e => setDebtAmount(e.target.value)} placeholder="0.00" className="mt-1" />
             </div>
 
-            {/* Notes */}
             <div>
               <Label>ملاحظات <span className="text-muted-foreground text-xs">(اختياري)</span></Label>
-              <Input
-                value={debtNotes}
-                onChange={e => setDebtNotes(e.target.value)}
-                placeholder="سبب الدين أو تفاصيل إضافية"
-                className="mt-1"
-              />
+              <Input value={debtNotes} onChange={e => setDebtNotes(e.target.value)}
+                placeholder="سبب الدين أو تفاصيل إضافية" className="mt-1" />
             </div>
 
-            {/* Preview */}
             {selectedParty && debtAmount && parseFloat(debtAmount) > 0 && (
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm">
                 <p className="text-orange-700">
