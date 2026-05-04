@@ -216,4 +216,43 @@ router.post("/sales/:id/add-items", requireAuth, async (req: AuthenticatedReques
   res.json(await formatSale(updated));
 });
 
+// ── Record payment on existing sale ──────────────────────────────────────────
+router.post("/sales/:id/payment", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
+  const { amount, notes } = req.body;
+  if (!amount || parseFloat(amount) <= 0) { res.status(400).json({ error: "المبلغ مطلوب" }); return; }
+
+  const [sale] = await db.select().from(salesTable).where(eq(salesTable.id, id));
+  if (!sale) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
+
+  const payAmount    = parseFloat(amount);
+  const newPaid      = parseFloat(sale.paidAmount as string) + payAmount;
+  const newRemaining = Math.max(0, parseFloat(sale.remainingDebt as string) - payAmount);
+
+  await db.update(salesTable)
+    .set({ paidAmount: newPaid.toString(), remainingDebt: newRemaining.toString() })
+    .where(eq(salesTable.id, id));
+
+  // Update matching customer debt record
+  if (sale.customerName) {
+    const [customerDebt] = await db.select().from(debtsTable)
+      .where(and(
+        eq(debtsTable.type, "customer"),
+        like(debtsTable.customerName, sale.customerName),
+        ne(debtsTable.status, "paid"),
+      ));
+    if (customerDebt) {
+      const newDebtPaid = parseFloat(customerDebt.paidAmount as string) + payAmount;
+      const newDebtRem  = Math.max(0, parseFloat(customerDebt.remainingAmount as string) - payAmount);
+      const debtStatus  = newDebtRem <= 0 ? "paid" : "partial";
+      await db.update(debtsTable)
+        .set({ paidAmount: newDebtPaid.toString(), remainingAmount: newDebtRem.toString(), status: debtStatus })
+        .where(eq(debtsTable.id, customerDebt.id));
+    }
+  }
+
+  const [updated] = await db.select().from(salesTable).where(eq(salesTable.id, id));
+  res.json({ ...(await formatSale(updated)), _paymentNote: notes || null });
+});
+
 export default router;

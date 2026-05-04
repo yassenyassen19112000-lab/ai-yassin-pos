@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Loader2, Trash2, Receipt, Search, Minus, RotateCcw, PackagePlus } from "lucide-react";
+import { Plus, Loader2, Trash2, Receipt, Search, Minus, RotateCcw, PackagePlus, Banknote, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface PurchaseItem {
@@ -143,6 +143,11 @@ export default function Purchases() {
   const [returnReason, setReturnReason]         = useState("");
   const [returnSuccess, setReturnSuccess]       = useState<any>(null);
 
+  // ── payment dialog ────────────────────────────────────────────────────────
+  const [paymentPurchaseId, setPaymentPurchaseId]   = useState<number | null>(null);
+  const [paymentPurchaseData, setPaymentPurchaseData] = useState<any>(null);
+  const [paymentAmount, setPaymentAmount]           = useState("");
+
   // ── add-items dialog ──────────────────────────────────────────────────────
   const [addItemsPurchaseId, setAddItemsPurchaseId] = useState<number | null>(null);
   const [addItemsList, setAddItemsList]             = useState<AddItem[]>([]);
@@ -225,6 +230,20 @@ export default function Purchases() {
       toast({ title: "تم إضافة المنتجات للفاتورة" });
     },
     onError: () => toast({ title: "خطأ في إضافة المنتجات", variant: "destructive" }),
+  });
+
+  const paymentMutation = useMutation({
+    mutationFn: ({ id, amount }: { id: number; amount: number }) =>
+      apiClient(`/api/purchases/${id}/payment`, { method: "POST", body: JSON.stringify({ amount }) }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: getListPurchasesQueryKey() });
+      qc.invalidateQueries({ queryKey: ["purchase-detail", paymentPurchaseId] });
+      qc.invalidateQueries({ queryKey: ["debts"] });
+      setPaymentPurchaseData(data);
+      setPaymentAmount("");
+      toast({ title: "تم تسجيل الدفعة بنجاح" });
+    },
+    onError: () => toast({ title: "خطأ في تسجيل الدفعة", variant: "destructive" }),
   });
 
   // ── close supplier dropdown on outside click ──────────────────────────────
@@ -496,6 +515,23 @@ export default function Purchases() {
                 )}
               </div>
 
+              {/* Pay button — shown when there's remaining balance to supplier */}
+              {purchaseDetail.remainingAmount > 0.005 && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-orange-600">متبقي للمورد</p>
+                    <p className="text-orange-700 font-bold text-lg">{formatCurrency(purchaseDetail.remainingAmount)}</p>
+                  </div>
+                  <Button
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => { setPaymentPurchaseId(purchaseDetail.id); setPaymentPurchaseData(null); setPaymentAmount(""); }}
+                  >
+                    <Banknote className="w-4 h-4 ml-2" />
+                    تسجيل دفعة
+                  </Button>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => setSelectedPurchaseId(null)}>
                   إغلاق
@@ -507,6 +543,100 @@ export default function Purchases() {
                 <Button variant="outline" className="text-orange-500 border-orange-200"
                   onClick={() => { setSelectedPurchaseId(null); openReturn(purchaseDetail); }}>
                   <RotateCcw className="w-4 h-4 ml-1" />مرتجع
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          PAYMENT DIALOG
+      ══════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={!!paymentPurchaseId} onOpenChange={(open) => { if (!open) { setPaymentPurchaseId(null); setPaymentPurchaseData(null); setPaymentAmount(""); } }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="w-5 h-5 text-green-600" />
+              تسجيل دفعة للمورد
+            </DialogTitle>
+          </DialogHeader>
+
+          {paymentPurchaseData ? (
+            <div className="space-y-3">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <Check className="w-10 h-10 text-green-500 mx-auto mb-2" />
+                <p className="font-bold text-green-700">تم تسجيل الدفعة بنجاح</p>
+              </div>
+              <div className="border rounded-lg divide-y text-sm">
+                <div className="flex justify-between px-3 py-2 text-muted-foreground">
+                  <span>إجمالي المدفوع للمورد</span>
+                  <span className="text-green-600 font-semibold">{formatCurrency(paymentPurchaseData.paidAmount)}</span>
+                </div>
+                {paymentPurchaseData.remainingAmount > 0.005 ? (
+                  <div className="flex justify-between px-3 py-2.5 font-bold text-orange-700 bg-orange-50 rounded-b-lg">
+                    <span>المتبقي للمورد</span>
+                    <span>+ {formatCurrency(paymentPurchaseData.remainingAmount)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between px-3 py-2.5 font-bold text-green-700 bg-green-50 rounded-b-lg">
+                    <span>✓ الحساب مسوَّى تماماً</span>
+                    <span>{formatCurrency(0)}</span>
+                  </div>
+                )}
+              </div>
+              <Button className="w-full" onClick={() => { setPaymentPurchaseId(null); setPaymentPurchaseData(null); }}>إغلاق</Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {(() => {
+                const purchase = (purchases ?? []).find(p => p.id === paymentPurchaseId);
+                return purchase ? (
+                  <div className="bg-muted rounded-lg p-3 text-sm">
+                    <p className="font-medium">{purchase.supplierName}</p>
+                    {purchase.invoiceNumber && <p className="text-xs text-muted-foreground">{purchase.invoiceNumber}</p>}
+                    <p className="text-orange-600 font-bold mt-0.5">المتبقي للمورد: {formatCurrency(purchase.remainingAmount)}</p>
+                  </div>
+                ) : null;
+              })()}
+
+              <div>
+                <Label>المبلغ المدفوع (ج.م) *</Label>
+                <Input
+                  type="number" step="0.01" min="0.01"
+                  value={paymentAmount}
+                  onChange={e => setPaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1 text-lg font-bold"
+                  autoFocus
+                />
+              </div>
+
+              {paymentAmount && parseFloat(paymentAmount) > 0 && (() => {
+                const purchase = (purchases ?? []).find(p => p.id === paymentPurchaseId);
+                if (!purchase) return null;
+                const remaining = Math.max(0, purchase.remainingAmount - parseFloat(paymentAmount));
+                return (
+                  <div className={`rounded-lg p-3 text-sm border-2 ${remaining <= 0 ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-300"}`}>
+                    <p className={`font-bold ${remaining <= 0 ? "text-green-700" : "text-blue-700"}`}>
+                      {remaining <= 0 ? "✓ سيُسوَّى حساب المورد كاملاً" : `المتبقي للمورد بعد الدفعة: ${formatCurrency(remaining)}`}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setPaymentPurchaseId(null); setPaymentAmount(""); }}>إلغاء</Button>
+                <Button
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || paymentMutation.isPending}
+                  onClick={() => {
+                    if (!paymentPurchaseId || !paymentAmount) return;
+                    paymentMutation.mutate({ id: paymentPurchaseId, amount: parseFloat(paymentAmount) });
+                  }}
+                >
+                  {paymentMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                  تسجيل الدفعة
                 </Button>
               </div>
             </div>

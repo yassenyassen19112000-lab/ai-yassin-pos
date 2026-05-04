@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Eye, Printer, MessageCircle, FileText, RotateCcw, Minus, Plus, Check, PackagePlus, Trash2 } from "lucide-react";
+import { Loader2, Eye, Printer, MessageCircle, FileText, RotateCcw, Minus, Plus, Check, PackagePlus, Trash2, Banknote } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface ReturnItem { productId: number; productName: string; quantity: number; maxQty: number; sellingPrice: number; }
@@ -33,6 +33,11 @@ export default function Sales() {
   const [addNewProduct, setAddNewProduct]       = useState("");
   const [addNewQty, setAddNewQty]               = useState("1");
   const [addNewPrice, setAddNewPrice]           = useState("");
+  // payment state
+  const [paymentSaleId, setPaymentSaleId]     = useState<number | null>(null);
+  const [paymentSaleData, setPaymentSaleData] = useState<any>(null);
+  const [paymentAmount, setPaymentAmount]     = useState("");
+  const [paymentNotes, setPaymentNotes]       = useState("");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -87,6 +92,20 @@ export default function Sales() {
       toast({ title: "تم إضافة المنتجات للفاتورة" });
     },
     onError: () => toast({ title: "خطأ في إضافة المنتجات", variant: "destructive" }),
+  });
+
+  const paymentMutation = useMutation({
+    mutationFn: ({ id, amount, notes }: { id: number; amount: number; notes?: string }) =>
+      apiClient(`/api/sales/${id}/payment`, { method: "POST", body: JSON.stringify({ amount, notes }) }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ["sales"] });
+      qc.invalidateQueries({ queryKey: ["debts"] });
+      setPaymentSaleData(data);
+      setPaymentAmount("");
+      setPaymentNotes("");
+      toast({ title: `تم تسجيل دفعة ${formatCurrency(parseFloat(paymentAmount))} بنجاح` });
+    },
+    onError: () => toast({ title: "خطأ في تسجيل الدفعة", variant: "destructive" }),
   });
 
   const openReturn = (sale: any) => {
@@ -398,6 +417,23 @@ export default function Sales() {
                 <p className="text-center text-sm mt-4 text-gray-600 border-t border-gray-300 pt-3">شكراً لتعاملكم معنا</p>
               </div>
 
+              {/* Pay button — shown when there's remaining debt */}
+              {saleDetail.remainingDebt > 0.005 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-red-600">متبقي على العميل</p>
+                    <p className="text-red-700 font-bold text-lg">{formatCurrency(saleDetail.remainingDebt)}</p>
+                  </div>
+                  <Button
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => { setPaymentSaleId(saleDetail.id); setPaymentSaleData(null); setPaymentAmount(""); setPaymentNotes(""); }}
+                  >
+                    <Banknote className="w-4 h-4 ml-2" />
+                    تسجيل دفعة
+                  </Button>
+                </div>
+              )}
+
               <div className="flex gap-2 flex-wrap">
                 <Button variant="outline" className="flex-1" onClick={() => window.print()}>
                   <Printer className="w-4 h-4 ml-2" />طباعة
@@ -411,6 +447,103 @@ export default function Sales() {
                 </Button>
                 <Button variant="outline" className="text-orange-500 border-orange-200" onClick={() => { setSelectedSaleId(null); openReturn(saleDetail); }}>
                   <RotateCcw className="w-4 h-4 ml-1" />مرتجع
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Payment dialog ────────────────────────────────────────────── */}
+      <Dialog open={!!paymentSaleId} onOpenChange={(open) => { if (!open) { setPaymentSaleId(null); setPaymentSaleData(null); setPaymentAmount(""); } }}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="w-5 h-5 text-green-600" />
+              تسجيل دفعة على فاتورة
+            </DialogTitle>
+          </DialogHeader>
+
+          {paymentSaleData ? (
+            /* ── Success state ── */
+            <div className="space-y-3">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <Check className="w-10 h-10 text-green-500 mx-auto mb-2" />
+                <p className="font-bold text-green-700">تم تسجيل الدفعة بنجاح</p>
+              </div>
+              <div className="border rounded-lg divide-y text-sm">
+                <div className="flex justify-between px-3 py-2 text-muted-foreground">
+                  <span>إجمالي المدفوع</span>
+                  <span className="text-green-600 font-semibold">{formatCurrency(paymentSaleData.paidAmount)}</span>
+                </div>
+                {paymentSaleData.remainingDebt > 0 ? (
+                  <div className="flex justify-between px-3 py-2.5 font-bold text-red-700 bg-red-50 rounded-b-lg">
+                    <span>المتبقي على العميل</span>
+                    <span>+ {formatCurrency(paymentSaleData.remainingDebt)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between px-3 py-2.5 font-bold text-green-700 bg-green-50 rounded-b-lg">
+                    <span>✓ الحساب مسوَّى تماماً</span>
+                    <span>{formatCurrency(0)}</span>
+                  </div>
+                )}
+              </div>
+              <Button className="w-full" onClick={() => { setPaymentSaleId(null); setPaymentSaleData(null); }}>إغلاق</Button>
+            </div>
+          ) : (
+            /* ── Input state ── */
+            <div className="space-y-4">
+              {(() => {
+                const sale = (sales ?? []).find(s => s.id === paymentSaleId);
+                return sale ? (
+                  <div className="bg-muted rounded-lg p-3 text-sm">
+                    <p className="font-medium">{sale.customerName || "عميل نقدي"} — {sale.invoiceNumber}</p>
+                    <p className="text-red-600 font-bold mt-0.5">المتبقي: {formatCurrency(sale.remainingDebt)}</p>
+                  </div>
+                ) : null;
+              })()}
+
+              <div>
+                <Label>المبلغ المدفوع (ج.م) *</Label>
+                <Input
+                  type="number" step="0.01" min="0.01"
+                  value={paymentAmount}
+                  onChange={e => setPaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1 text-lg font-bold"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label>ملاحظات <span className="text-muted-foreground text-xs">(اختياري)</span></Label>
+                <Input value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} placeholder="سبب الدفعة..." className="mt-1" />
+              </div>
+
+              {paymentAmount && parseFloat(paymentAmount) > 0 && (() => {
+                const sale = (sales ?? []).find(s => s.id === paymentSaleId);
+                if (!sale) return null;
+                const remaining = Math.max(0, sale.remainingDebt - parseFloat(paymentAmount));
+                return (
+                  <div className={`rounded-lg p-3 text-sm border-2 ${remaining <= 0 ? "bg-green-50 border-green-300" : "bg-blue-50 border-blue-300"}`}>
+                    <p className={`font-bold ${remaining <= 0 ? "text-green-700" : "text-blue-700"}`}>
+                      {remaining <= 0 ? "✓ سيُسوَّى الحساب كاملاً" : `المتبقي بعد الدفعة: ${formatCurrency(remaining)}`}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setPaymentSaleId(null); setPaymentAmount(""); }}>إلغاء</Button>
+                <Button
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || paymentMutation.isPending}
+                  onClick={() => {
+                    if (!paymentSaleId || !paymentAmount) return;
+                    paymentMutation.mutate({ id: paymentSaleId, amount: parseFloat(paymentAmount), notes: paymentNotes || undefined });
+                  }}
+                >
+                  {paymentMutation.isPending && <Loader2 className="w-4 h-4 animate-spin ml-2" />}
+                  تسجيل الدفعة
                 </Button>
               </div>
             </div>

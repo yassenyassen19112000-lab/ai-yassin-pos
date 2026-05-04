@@ -281,6 +281,54 @@ router.post("/purchases/:id/add-items", requireAuth, async (req, res): Promise<v
   res.json(await formatPurchase(updated));
 });
 
+// ── Record payment on existing purchase ──────────────────────────────────────
+router.post("/purchases/:id/payment", requireAuth, async (req, res): Promise<void> => {
+  const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
+  const { amount } = req.body;
+  if (!amount || parseFloat(amount) <= 0) { res.status(400).json({ error: "المبلغ مطلوب" }); return; }
+
+  const [purchase] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, id));
+  if (!purchase) { res.status(404).json({ error: "الفاتورة غير موجودة" }); return; }
+
+  const payAmount    = parseFloat(amount);
+  const newPaid      = parseFloat(purchase.paidAmount as string) + payAmount;
+  const newRemaining = Math.max(0, parseFloat(purchase.remainingAmount as string) - payAmount);
+
+  await db.update(purchasesTable)
+    .set({ paidAmount: newPaid.toString(), remainingAmount: newRemaining.toString() })
+    .where(eq(purchasesTable.id, id));
+
+  // Update matching supplier debt record
+  const [existingDebt] = await db.select().from(debtsTable)
+    .where(and(
+      eq(debtsTable.type, "supplier"),
+      eq(debtsTable.supplierId, purchase.supplierId),
+      ne(debtsTable.status, "paid"),
+    ));
+  if (existingDebt) {
+    const newDebtPaid = parseFloat(existingDebt.paidAmount as string) + payAmount;
+    const newDebtRem  = Math.max(0, parseFloat(existingDebt.remainingAmount as string) - payAmount);
+    const debtStatus  = newDebtRem <= 0 ? "paid" : "partial";
+    await db.update(debtsTable)
+      .set({ paidAmount: newDebtPaid.toString(), remainingAmount: newDebtRem.toString(), status: debtStatus })
+      .where(eq(debtsTable.id, existingDebt.id));
+  }
+
+  // Recalculate supplier total debt
+  const [supplier] = await db.select().from(suppliersTable).where(eq(suppliersTable.id, purchase.supplierId));
+  if (supplier) {
+    const allPending = await db.select().from(debtsTable)
+      .where(and(eq(debtsTable.type, "supplier"), eq(debtsTable.supplierId, purchase.supplierId), ne(debtsTable.status, "paid")));
+    const newTotal = allPending.reduce((s, d) => s + parseFloat(d.remainingAmount as string), 0);
+    await db.update(suppliersTable)
+      .set({ totalDebt: newTotal.toString() })
+      .where(eq(suppliersTable.id, purchase.supplierId));
+  }
+
+  const [updated] = await db.select().from(purchasesTable).where(eq(purchasesTable.id, id));
+  res.json(await formatPurchase(updated));
+});
+
 router.get("/purchases/:id/returns", requireAuth, async (req, res): Promise<void> => {
   const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
   const { db: dbInst, purchaseReturnsTable } = await import("@workspace/db");
