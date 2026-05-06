@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, numeric, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -28,6 +28,17 @@ export const saleItemsTable = pgTable("sale_items", {
   quantity: integer("quantity").notNull(),
   sellingPrice: numeric("selling_price", { precision: 10, scale: 2 }).notNull(),
   total: numeric("total", { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const salesReturnsTable = pgTable("sales_returns", {
+  id: serial("id").primaryKey(),
+  saleId: integer("sale_id").notNull(),
+  returnNumber: text("return_number").notNull(),
+  returnAmount: numeric("return_amount", { precision: 10, scale: 2 }).notNull(),
+  reason: text("reason"),
+  cashierName: text("cashier_name").notNull().default("كاشير"),
+  items: jsonb("items").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
