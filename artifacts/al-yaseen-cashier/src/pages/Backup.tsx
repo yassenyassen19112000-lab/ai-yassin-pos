@@ -29,7 +29,7 @@ interface Section {
   color: string;
   bg: string;
   getCount: (d: ReturnType<typeof useAll>) => number;
-  doExport: (d: ReturnType<typeof useAll>) => void;
+  doExport: (d: ReturnType<typeof useAll>) => Promise<void>;
 }
 
 const sections: Section[] = [
@@ -157,7 +157,7 @@ export default function Backup() {
     if (allData.isLoading) return;
     setExporting(true);
     try {
-      exportFullBackup({
+      await exportFullBackup({
         products:      allData.products.data  as any[] ?? [],
         customers:     allData.customers.data as any[] ?? [],
         suppliers:     allData.suppliers.data as any[] ?? [],
@@ -282,9 +282,9 @@ export default function Backup() {
                       size="sm"
                       variant="outline"
                       className={`border ${sec.bg} ${sec.color} hover:opacity-80`}
-                      onClick={() => {
+                      onClick={async () => {
                         try {
-                          sec.doExport(allData);
+                          await sec.doExport(allData);
                           toast({ title: `✅ تم تصدير ${sec.label} بنجاح` });
                         } catch {
                           toast({ title: "خطأ في التصدير", variant: "destructive" });

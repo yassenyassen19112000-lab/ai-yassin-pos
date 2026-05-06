@@ -1,22 +1,54 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
-function toSheet(data: any[], headers: { key: string; label: string }[]) {
-  const rows = data.map(row =>
-    Object.fromEntries(headers.map(h => [h.label, row[h.key] ?? ""]))
-  );
-  return XLSX.utils.json_to_sheet(rows, { header: headers.map(h => h.label) });
+function triggerDownload(buffer: ArrayBuffer, filename: string) {
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function styleHeader(ws: XLSX.WorkSheet, cols: number) {
-  const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
-  for (let c = 0; c <= cols - 1; c++) {
-    const cell = XLSX.utils.encode_cell({ r: 0, c });
-    if (!ws[cell]) continue;
-    ws[cell].s = { font: { bold: true }, fill: { fgColor: { rgb: "1A1033" } } };
-  }
+function addSheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  data: any[],
+  headers: { key: string; label: string }[]
+) {
+  const sheet = workbook.addWorksheet(sheetName);
+
+  sheet.columns = headers.map((h) => ({
+    header: h.label,
+    key: h.key,
+    width: 20,
+  }));
+
+  const headerRow = sheet.getRow(1);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1A1033" },
+    };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  });
+
+  data.forEach((row) => {
+    const rowData: Record<string, any> = {};
+    headers.forEach((h) => {
+      rowData[h.key] = row[h.key] ?? "";
+    });
+    sheet.addRow(rowData);
+  });
+
+  return sheet;
 }
 
-export function exportFullBackup(data: {
+export async function exportFullBackup(data: {
   products: any[];
   customers: any[];
   suppliers: any[];
@@ -27,9 +59,9 @@ export function exportFullBackup(data: {
   debts: any[];
   expenses: any[];
 }) {
-  const wb = XLSX.utils.book_new();
+  const workbook = new ExcelJS.Workbook();
 
-  const productsSheet = toSheet(data.products, [
+  addSheet(workbook, "المنتجات", data.products, [
     { key: "id", label: "الكود" },
     { key: "name", label: "اسم المنتج" },
     { key: "category", label: "الفئة" },
@@ -40,17 +72,15 @@ export function exportFullBackup(data: {
     { key: "minStockLevel", label: "الحد الأدنى" },
     { key: "barcode", label: "الباركود" },
   ]);
-  XLSX.utils.book_append_sheet(wb, productsSheet, "المنتجات");
 
-  const customersSheet = toSheet(data.customers, [
+  addSheet(workbook, "العملاء", data.customers, [
     { key: "id", label: "الكود" },
     { key: "name", label: "اسم العميل" },
     { key: "phone", label: "رقم الهاتف" },
     { key: "notes", label: "ملاحظات" },
   ]);
-  XLSX.utils.book_append_sheet(wb, customersSheet, "العملاء");
 
-  const suppliersSheet = toSheet(data.suppliers, [
+  addSheet(workbook, "الموردين", data.suppliers, [
     { key: "id", label: "الكود" },
     { key: "name", label: "اسم المورد" },
     { key: "phone", label: "رقم الهاتف" },
@@ -58,9 +88,8 @@ export function exportFullBackup(data: {
     { key: "totalDebt", label: "إجمالي الديون" },
     { key: "notes", label: "ملاحظات" },
   ]);
-  XLSX.utils.book_append_sheet(wb, suppliersSheet, "الموردين");
 
-  const salesSheet = toSheet(data.sales, [
+  addSheet(workbook, "المبيعات", data.sales, [
     { key: "invoiceNumber", label: "رقم الفاتورة" },
     { key: "customerName", label: "اسم العميل" },
     { key: "customerPhone", label: "رقم الهاتف" },
@@ -71,18 +100,16 @@ export function exportFullBackup(data: {
     { key: "cashierName", label: "الكاشير" },
     { key: "createdAt", label: "التاريخ" },
   ]);
-  XLSX.utils.book_append_sheet(wb, salesSheet, "المبيعات");
 
-  const saleItemsSheet = toSheet(data.saleItems, [
+  addSheet(workbook, "بنود المبيعات", data.saleItems, [
     { key: "saleId", label: "رقم الفاتورة (ID)" },
     { key: "productName", label: "المنتج" },
     { key: "quantity", label: "الكمية" },
     { key: "sellingPrice", label: "سعر البيع" },
     { key: "total", label: "الإجمالي" },
   ]);
-  XLSX.utils.book_append_sheet(wb, saleItemsSheet, "بنود المبيعات");
 
-  const purchasesSheet = toSheet(data.purchases, [
+  addSheet(workbook, "المشتريات", data.purchases, [
     { key: "id", label: "الكود" },
     { key: "supplierName", label: "المورد" },
     { key: "invoiceNumber", label: "رقم الفاتورة" },
@@ -92,9 +119,8 @@ export function exportFullBackup(data: {
     { key: "paymentType", label: "نوع الدفع" },
     { key: "createdAt", label: "التاريخ" },
   ]);
-  XLSX.utils.book_append_sheet(wb, purchasesSheet, "المشتريات");
 
-  const debtsSheet = toSheet(data.debts, [
+  addSheet(workbook, "الديون", data.debts, [
     { key: "type", label: "النوع" },
     { key: "customerName", label: "اسم العميل" },
     { key: "supplierName", label: "اسم المورد" },
@@ -103,9 +129,8 @@ export function exportFullBackup(data: {
     { key: "remainingAmount", label: "المتبقي" },
     { key: "status", label: "الحالة" },
   ]);
-  XLSX.utils.book_append_sheet(wb, debtsSheet, "الديون");
 
-  const expensesSheet = toSheet(data.expenses, [
+  addSheet(workbook, "المصروفات", data.expenses, [
     { key: "id", label: "الكود" },
     { key: "description", label: "البيان" },
     { key: "amount", label: "المبلغ" },
@@ -113,22 +138,21 @@ export function exportFullBackup(data: {
     { key: "expenseDate", label: "التاريخ" },
     { key: "notes", label: "ملاحظات" },
   ]);
-  XLSX.utils.book_append_sheet(wb, expensesSheet, "المصروفات");
 
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  XLSX.writeFile(wb, `نسخة_احتياطية_آل_ياسين_${dateStr}.xlsx`);
+  const buffer = await workbook.xlsx.writeBuffer();
+  triggerDownload(buffer as ArrayBuffer, `نسخة_احتياطية_آل_ياسين_${dateStr}.xlsx`);
 }
 
-export function exportSheet(
+export async function exportSheet(
   sheetName: string,
   fileName: string,
   data: any[],
   headers: { key: string; label: string }[]
 ) {
-  const wb = XLSX.utils.book_new();
-  const ws = toSheet(data, headers);
-  styleHeader(ws, headers.length);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  XLSX.writeFile(wb, `${fileName}.xlsx`);
+  const workbook = new ExcelJS.Workbook();
+  addSheet(workbook, sheetName, data, headers);
+  const buffer = await workbook.xlsx.writeBuffer();
+  triggerDownload(buffer as ArrayBuffer, `${fileName}.xlsx`);
 }
